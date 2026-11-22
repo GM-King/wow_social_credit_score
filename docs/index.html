@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Download Social Credit System for World of Warcraft Forever. Read character reviews, compare instance performance, and see scores in Group Finder.">
+  <title>Social Credit System · WoW Forever</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="bar shell">
+    <a class="brand" href="#top"><span aria-hidden="true">✦</span> Social Credit System</a>
+    <nav aria-label="Main navigation">
+      <a href="#install">Installation</a>
+      <a href="#guide">Player guide</a>
+      <a href="https://github.com/GM-King/wow_social_credit_score">GitHub ↗</a>
+    </nav>
+  </header>
+
+  <main id="top">
+    <section class="hero shell" aria-labelledby="title">
+      <div class="hero-copy">
+        <p class="eyebrow">World of Warcraft Forever</p>
+        <h1 id="title">Social Credit <em>System</em></h1>
+        <p class="intro">Read player reviews, compare dungeon and raid performance, and see Social Credit Scores in Group Finder.</p>
+        <div class="actions">
+          <a class="button" href="https://github.com/GM-King/wow_social_credit_score/releases/download/v2.8.0/SocialCreditSystem-2.8.0.zip">Download 2.8.0 <span aria-hidden="true">↓</span></a>
+          <a href="#install">Installation</a>
+        </div>
+        <p class="compat">For same-faction characters at level 60</p>
+      </div>
+      <img class="hero-art" src="art/guild-archive.webp" alt="An orc archivist records a returning adventuring party in an open ledger" width="1440" height="960" fetchpriority="high">
+    </section>
+
+    <section class="install" id="install" aria-labelledby="install-title">
+      <div class="shell install-layout">
+        <div>
+          <p class="eyebrow">Setup</p>
+          <h2 id="install-title">Install the addon</h2>
+        </div>
+        <ol>
+          <li>Download and extract <strong>SocialCreditSystem-2.8.0.zip</strong>.</li>
+          <li>Move the extracted <strong>SocialCreditSystem</strong> folder into <code>_forever_/Interface/AddOns/</code>.</li>
+          <li>Enable Social Credit System in the AddOns list. In game, target another eligible character and type <code>/scs</code>.</li>
+        </ol>
+      </div>
+    </section>
+
+    <section class="guide shell" id="guide" aria-labelledby="guide-title">
+      <div class="guide-heading">
+        <p class="eyebrow">Player guide</p>
+        <h2 id="guide-title">Inside a profile</h2>
+      </div>
+      <div class="guide-layout">
+        <article class="profile" aria-labelledby="example-name">
+          <img src="art/reputation-seal.webp" alt="" width="960" height="640" loading="lazy">
+          <div class="profile-content">
+            <p class="eyebrow">Example profile</p>
+            <div class="identity">
+              <div>
+                <h3 id="example-name">Mara Flintbloom</h3>
+                <p>Protection Warrior · Tank</p>
+              </div>
+              <div class="score"><strong>782</strong><span>Score / 1000</span></div>
+            </div>
+            <p class="stars"><span class="star-visual" aria-hidden="true">★★★★☆<span>★★★★★</span></span> <span>4.50 average · 8 reviews</span></p>
+            <blockquote>“Clear calls and steady pulls.”</blockquote>
+          </div>
+        </article>
+        <div class="guide-notes">
+          <article>
+            <h3>Read and write reviews</h3>
+            <p>Rate an eligible player in half-star steps and add a short note. The original author can edit or delete their review. Other eligible players can read synced reviews. The reviewed player cannot open their own profile.</p>
+          </article>
+          <article>
+            <h3>Understand the score</h3>
+            <p>Five reviews unlock the star average and a score out of 1000. Reviews contribute 75%. Instance performance contributes 25% and uses the stronger DPS or HPS benchmark for the player’s class, talent tree, tank or non-tank role, and group size. Scores stay provisional while combat data is limited.</p>
+          </article>
+          <article>
+            <h3>Spot a black mark</h3>
+            <p>A confirmed zero-star review places a mark visible to the reviewer and their current guildmates on profiles, portraits, Blizzard or Prat chat, and Group Finder. Right-click a sender’s name in chat and choose <strong>Open SCS</strong> to inspect their profile.</p>
+          </article>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer shell">
+    <span>Social Credit System · 2.8.0</span>
+    <a href="https://github.com/GM-King/wow_social_credit_score/releases/tag/v2.8.0">Release notes</a>
+    <a href="https://github.com/GM-King/wow_social_credit_score/issues">Report an issue</a>
+  </footer>
+</body>
+</html>
