@@ -1,0 +1,18 @@
+## Interface: 16001
+## Title: Social Credit System
+## Notes: Same-faction character reviews and tracked gameplay statistics.
+## Version: 2.8.0
+## SavedVariables: SocialCreditDB, SocialCreditBackup
+## IconTexture: Interface\AddOns\SocialCreditSystem\Media\Crest
+
+Core.lua
+Score.lua
+GroupStats.lua
+Talents.lua
+CombatBuilds.lua
+Stats.lua
+Sync.lua
+ReviewRelationships.lua
+BlackMarks.lua
+Profile.lua
+GroupFinder.lua
