@@ -72,7 +72,7 @@ code { font-size: .9em; overflow-wrap: anywhere; }
 .guide-heading .eyebrow { color: var(--plum); margin-bottom: .5rem; }
 .guide-layout { display: grid; grid-template-columns: 1fr 1fr; gap: 2rem clamp(2rem, 6vw, 5rem); margin-top: 2rem; align-items: start; }
 .profile { background: #fff9ec; border: 1px solid var(--rule); }
-.profile img { width: 100%; height: auto; aspect-ratio: 1.9; object-fit: cover; object-position: center 78%; display: block; }
+.profile img { width: 100%; height: auto; aspect-ratio: 1.9; object-fit: cover; object-position: center bottom; display: block; }
 .profile-content { padding: clamp(.9rem, 3vw, 1.8rem); }
 .profile .eyebrow { color: var(--plum); margin-bottom: .65rem; }
 .identity { display: flex; justify-content: space-between; flex-wrap: wrap; gap: .7rem 1.4rem; align-items: center; }
