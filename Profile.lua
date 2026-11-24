@@ -7,7 +7,7 @@ local friendColor, guildColor, reviewEdge = {.48, .91, .83}, {.81, .72, .98}, {.
 local ownReviewColor = {1, .83, .58}
 local width, height, perPage = 812, 566, 3
 local page = 1
-local pendingProfile, pendingUntil
+local pendingProfile
 local confirmation = "SOCIAL_CREDIT_CONFIRM_ZERO"
 local confirmDelete = "SOCIAL_CREDIT_CONFIRM_DELETE"
 
@@ -107,7 +107,7 @@ local function combatRate(row)
 end
 
 local function statsText(subject)
-    local stats = S.ProfileStats(subject)
+    local stats = S.Eligible(subject) and S.ProfileStats(subject)
     local tree, name, role, lastSeen = S.CurrentBuild(subject)
     local build = S.BuildStats(subject, tree, role)
     local rows, lifetime = {}, {}
@@ -152,6 +152,7 @@ end
 
 local function showEditor()
     local subject = S.openSubject
+    if not S.Viewable(subject) then return end
     local owner = S.db.authored[subject]
     if owner and owner ~= S.me.key then return end
     local old = (S.db.reviews[subject] or {})[S.me.key]
@@ -177,7 +178,12 @@ local function build()
     f:SetScript("OnShow", function(self)
         self:SetScale(math.min(1, UIParent:GetWidth() / (width + 32), UIParent:GetHeight() / (height + 32)))
     end)
-    f:SetScript("OnHide", function() S.openSubject = nil; f.editorShade:Hide() end)
+    f:SetScript("OnHide", function()
+        S.openSubject, pendingProfile, f.returnTo = nil, nil, nil
+        f.preview, f.lookupStatus = false, false
+        f.editorShade:Hide()
+        dismissConfirmation()
+    end)
     table.insert(UISpecialFrames, f:GetName())
     surface(f, 0, 0, width, height, .09, .063, .067, -2)
     art(f, 0, 4, width, 125, "GuildHall")
@@ -238,6 +244,12 @@ local function build()
     f.edit = button(f, 584, 63, 184, "Write review", showEditor)
     f.close = CreateFrame("Button", nil, f, "UIPanelCloseButton")
     f.close:SetPoint("TOPRIGHT", -3, -4)
+    f.close:SetScript("OnClick", function() f:Hide() end)
+    f.back = button(f, 584, 28, 184, "Back to player history", function()
+        local returnTo = f.returnTo
+        f:Hide()
+        if returnTo then returnTo() end
+    end)
     label(f, 38, 161, 210, "GameFontHighlightLarge", cream, "Character stats")
     f.ratesHeading = label(f, 38, 186, 215, "GameFontHighlightSmall", muted)
     f.ratesHeading:SetMaxLines(1)
@@ -318,6 +330,9 @@ local function build()
     shade:SetAllPoints(f)
     shade:SetFrameLevel(f:GetFrameLevel() + 8)
     shade:EnableMouse(true)
+    local closeEditorProfile = CreateFrame("Button", nil, shade, "UIPanelCloseButton")
+    closeEditorProfile:SetPoint("TOPRIGHT", -3, -4)
+    closeEditorProfile:SetScript("OnClick", function() f:Hide() end)
     surface(shade, 0, 0, width, height, 0, 0, 0):SetAlpha(.68)
     local editor = CreateFrame("Frame", nil, shade)
     f.editor = editor
@@ -365,7 +380,7 @@ local function build()
     body:SetSize(442, 66)
     body:SetTextInsets(4, 4, 3, 3)
     body:SetMaxBytes(960)
-    body:SetScript("OnEscapePressed", function() shade:Hide() end)
+    body:SetScript("OnEscapePressed", function() f:Hide() end)
     body:SetScript("OnCursorChanged", function(_, _, y, _, lineHeight)
         local caret = -y
         local scroll = scroller:GetVerticalScroll()
@@ -441,38 +456,64 @@ local function build()
     return f
 end
 
+function S.PaintProfilePortrait(texture, unit, class)
+    texture:SetTexCoord(0, 1, 0, 1)
+    texture:SetTexture(media .. "Crest")
+    if unit and SetPortraitTexture then
+        if pcall(SetPortraitTexture, texture, unit) then
+            texture:SetTexCoord(.17, .83, .17, .83)
+            return
+        end
+    end
+    local coords = CLASS_ICON_TCOORDS and CLASS_ICON_TCOORDS[class]
+    if coords then
+        texture:SetTexture("Interface\\Glues\\CharacterCreate\\UI-CharacterCreate-Classes")
+        texture:SetTexCoord(unpack(coords))
+    end
+end
+
+function S.PaintProfileBorder(texture, tier)
+    texture:SetTexture(media .. tier)
+    local shade = tier == "Neutral" and .57 or 1
+    texture:SetVertexColor(shade, shade, shade)
+end
+
 function S.Refresh(subject)
     if not S.me or not frame or not subject or subject ~= S.openSubject or S.db.alts[subject] then return end
-    if not S.Eligible(subject) then frame:Hide(); return end
+    local verified = S.Viewable(subject)
+    if not verified and not frame.preview then frame:Hide(); return end
     local rows = S.Reviews(subject, filter)
     local count, average, score, provisional, population, reviewers, brackets, review, combat = S.RatingSummary(subject)
+    local eligible = S.Eligible(subject)
+    if not eligible then count = S.ReviewAverage(subject) end
     local tier = S.Tier(score)
-    local profile = S.db.profiles[subject]
-    local blacklisted = S.BlackMarkReviewers(subject) ~= nil
+    local profile = S.db.profiles[subject] or {}
+    local blacklisted = verified and S.BlackMarkReviewers(subject) ~= nil
     frame.name:SetWidth(blacklisted and 315 or 410)
     frame.blacklist:ClearAllPoints()
     frame.blacklist:SetPoint("LEFT", frame.name, "LEFT", math.min(frame.name:GetStringWidth(), 315) + 8, 0)
     frame.blacklist:SetShown(blacklisted)
     frame.blackPortrait:SetShown(blacklisted)
     frame.guild:SetText(profile.guild == "" and "Unguilded" or profile.guild or "")
-    frame.score:SetText(score and ("%.2f SCS  ·  %s%s"):format(score, tier, provisional and "  ·  Provisional" or "")
-        or (average and (InCombatLockdown() and "Score refresh after combat" or "Class comparison unavailable")
+    frame.score:SetText(not verified and "Same-faction profile unverified"
+        or not profile.level and "Level unknown"
+        or not eligible and "SCS unlocks at level 60" or score and ("%.2f SCS  ·  %s%s"):format(score, tier, provisional and "  ·  Provisional" or "")
+        or (average and "Class comparison unavailable"
             or "Social Credit Score —"))
     S.PaintAverageStars(frame.averageStars, average, 13)
     frame.reviewMean:SetPoint("TOPLEFT", average and 211 or 132, -111)
-    frame.reviewMean:SetText(S.AverageCaption(count, average))
+    frame.reviewMean:SetText(eligible and S.AverageCaption(count, average)
+        or ("%d %s"):format(count, count == 1 and "review" or "reviews"))
     frame.scoreDetail = score and ("%s comparison · %d known characters\n%d qualifying review averages · %d combat brackets\nReviews %.2f × 75%% · Combat %.2f × 25%%%s")
         :format(profile.class, population, reviewers, brackets, review, combat,
             provisional and "\nSparse reviews use the star scale. Unmatched combat uses 500." or "") or nil
-    frame.border:SetTexture(media .. tier)
-    if tier == "Neutral" then frame.border:SetVertexColor(.57, .57, .57)
-    else frame.border:SetVertexColor(1, 1, 1) end
+    S.PaintProfileBorder(frame.border, tier)
     local owner = S.db.authored[subject]
     local owns = not owner or owner == S.me.key
-    frame.edit:SetEnabled(owns)
+    frame.edit:SetEnabled(verified and owns)
     local ownRecord = (S.db.reviews[subject] or {})[S.me.key]
     local editing = ownRecord and not ownRecord.deleted
-    frame.edit.caption:SetText(owner and (owns and (editing and "Edit review" or "Write review")
+    frame.edit.caption:SetText(not verified and "Review unavailable" or owner and (owns and (editing and "Edit review" or "Write review")
         or "Review slot on " .. (select(2, S.Identity(owner)) or owner))
         or "Write review")
     for choice, b in pairs(frame.filters) do
@@ -519,13 +560,13 @@ function S.Refresh(subject)
     for i, line in ipairs(rates) do frame.rates[i]:SetText(line) end
     for i, line in ipairs(stats) do frame.stats[i]:SetText(line) end
     local last = S.db.synced[subject]
-    frame.status:SetText(shared .. "  ·  Counts since tracking began  ·  "
+    frame.status:SetText(frame.preview and (frame.lookupStatus or "Checking profile...") or shared .. "  ·  Counts since tracking began  ·  "
         .. (last and "Synced " .. date("%d %b %H:%M", last) or "Local review data"))
 end
 
-local function open(key, unit)
-    if not S.me or not S.Eligible(key) then
-        print("Social Credit System: available at level 60 for known same-faction level-60 profiles.")
+local function open(key, unit, returnTo, preview)
+    if not S.me or (not preview and not S.Viewable(key)) then
+        print("Social Credit System: available for known same-faction characters.")
         return
     end
     if S.db.alts[key] then print("Social Credit System: your own profiles are private."); return end
@@ -533,59 +574,130 @@ local function open(key, unit)
     pendingProfile = nil
     dismissConfirmation()
     frame.editorShade:Hide()
+    frame.returnTo = returnTo
+    frame.preview, frame.lookupStatus = preview or false, false
+    frame.back:SetShown(returnTo ~= nil)
+    if returnTo and S.HidePlayerHistory then S.HidePlayerHistory() end
     filter, page, S.openSubject = "Newest", 1, key
-    frame.name:SetText(S.db.names[key])
-    frame.portrait:SetTexture(media .. "Crest")
-    frame.portrait:SetTexCoord(0, 1, 0, 1)
-    if unit then
-        local id = S.Unit(unit)
-        if id and id.key == key then
-            S.Call(SetPortraitTexture, frame.portrait, unit)
-            -- The inscribed square crops the transparent corners of WoW's portrait.
-            frame.portrait:SetTexCoord(.17, .83, .17, .83)
-        end
-    end
+    frame.name:SetText(S.db.names[key] or preview)
+    local id = unit and S.Unit(unit)
+    local profile = S.db.profiles[key]
+    S.PaintProfilePortrait(frame.portrait, id and id.key == key and unit, profile and profile.class)
     frame:Show()
-    S.RequestReviewGuildRoster()
     S.Refresh(key)
-    S.Query(key)
+    if not preview then
+        S.RequestReviewGuildRoster()
+        S.Query(key)
+    end
 end
 
 local function inspect(unit)
     local id = S.me and S.Unit(unit)
-    if id and id.level and id.level > 0 then S.Remember(id) end
-    return id and id.level == 60 and id or nil
+    if not id then return end
+    if not id.level or id.level < 1 or id.level > 60 then id.level = nil end
+    S.Remember(id)
+    return S.Viewable(id.key) and id or nil
+end
+
+local function findUnit(key, preferred)
+    local function matches(unit)
+        if not S.Readable(unit) or type(unit) ~= "string" then return end
+        local id = S.Unit(unit)
+        if id and id.key == key then
+            inspect(unit)
+            return unit
+        end
+    end
+    local unit = matches(preferred) or matches("target") or matches("focus") or matches("mouseover")
+    if unit then return unit end
+    local raid = S.Call(IsInRaid)
+    for index = 1, S.Call(raid and GetNumGroupMembers or GetNumSubgroupMembers) or 0 do
+        unit = matches((raid and "raid" or "party") .. index)
+        if unit then return unit end
+    end
+    local plates = C_NamePlate and S.Call(C_NamePlate.GetNamePlates)
+    if type(plates) == "table" then
+        for _, plate in ipairs(plates) do
+            if S.Readable(plate) then
+                unit = matches(plate.namePlateUnitToken)
+                if unit then return unit end
+            end
+        end
+    end
+end
+
+local function showLookupStatus(request, message)
+    if request.preview and frame and frame.preview and S.openSubject == request.key then
+        frame.lookupStatus = message
+        S.Refresh(request.key)
+    elseif request.returnTo and S.SetPlayerHistoryStatus then
+        S.SetPlayerHistoryStatus(message)
+    else
+        print("Social Credit System: " .. message)
+    end
+end
+
+function S.ProfileLookupOffline(key)
+    if pendingProfile and pendingProfile.key == key and (pendingProfile.preview or pendingProfile.returnTo) then
+        local message = pendingProfile.preview and ("Run /who " .. frame.preview .. " to verify this profile.")
+            or "Player is offline. Checking synced profiles."
+        showLookupStatus(pendingProfile, message)
+    end
+end
+
+function S.CancelHistoryProfileLookup()
+    if pendingProfile and pendingProfile.returnTo then pendingProfile = nil end
 end
 
 function S.OpenDiscoveredProfile(subject)
-    if subject == pendingProfile and GetTime() <= pendingUntil then
-        pendingProfile = nil
-        open(subject)
+    if not S.Viewable(subject) then return end
+    if frame and frame.preview and S.openSubject == subject then
+        open(subject, findUnit(subject))
+    elseif pendingProfile and subject == pendingProfile.key and GetTime() <= pendingProfile.expires then
+        open(subject, nil, pendingProfile.returnTo)
     end
 end
 
-local function openName(name)
+function S.OpenNamedProfile(name, returnTo, fromChat, chatUnit)
     pendingProfile = nil
     local key, display = S.Identity(name)
-    if not S.me or not key or S.db.alts[key] or S.db.profiles[key] then open(key); return end
-    for _, unit in ipairs({"target", "focus", "mouseover", "party1", "party2", "party3", "party4"}) do
-        local id = S.Unit(unit)
-        if id and id.key == key and id.level and id.level > 0 then
-            S.Remember(id)
-            open(key, unit)
-            return
-        end
+    if not S.me or not key or S.db.alts[key] then open(key, nil, returnTo); return end
+    local unit = (fromChat or not S.Viewable(key)) and findUnit(key, chatUnit)
+    if not unit and (not S.Viewable(key) or not S.db.profiles[key].level) then
+        local who = S.FindWhoProfile(key)
+        if who then S.Remember(who) end
     end
-    pendingProfile, pendingUntil = key, GetTime() + 90
-    S.FindProfile(name)
-    print("Social Credit System: looking up " .. display .. ".")
+    if unit or S.db.profiles[key] then open(key, unit, returnTo); return end
+    if fromChat then open(key, nil, returnTo, display) end
+    local request = {key = key, expires = GetTime() + 90, returnTo = returnTo, preview = fromChat}
+    pendingProfile = request
+    local whoRequested = fromChat and S.RequestWhoProfile(key, display)
+    if pendingProfile ~= request then return end
+    local status = S.FindProfile(name)
+    if fromChat then
+        local hint = "Run /who " .. display .. " to verify manually."
+        showLookupStatus(request, whoRequested and ("Checking /who. " .. hint) or hint)
+    else
+        showLookupStatus(request, status or "Checking synced profiles.")
+    end
     C_Timer.After(90, function()
-        if pendingProfile == key and GetTime() >= pendingUntil then
+        if pendingProfile == request then
             pendingProfile = nil
-            print("Social Credit System: could not verify a same-faction level-60 profile for " .. display .. ".")
+            local message = fromChat and ("Run /who " .. display .. " to verify this profile.")
+                or ("Could not verify a same-faction profile for " .. display .. ".")
+            showLookupStatus(request, message)
         end
     end)
 end
+
+S.On("PLAYER_TARGET_CHANGED", function()
+    if not frame or not frame.preview or not S.openSubject then return end
+    local id = S.Unit("target")
+    if id and id.key == S.openSubject then
+        inspect("target")
+        open(id.key, "target")
+    end
+end)
 
 SLASH_SOCIALCREDITSYSTEM1 = "/scs"
 SlashCmdList.SOCIALCREDITSYSTEM = function(input)
@@ -593,7 +705,7 @@ SlashCmdList.SOCIALCREDITSYSTEM = function(input)
     if input:match("^%s*$") then
         local id = inspect("target")
         open(id and id.key, "target")
-    else openName(input) end
+    else S.OpenNamedProfile(input) end
 end
 
 S.On("PLAYER_LOGIN", function()
@@ -602,10 +714,10 @@ S.On("PLAYER_LOGIN", function()
         Menu.ModifyMenu(tag, function(_, root, context)
             if not S.me or not context or not context.chatFrame then return end
             local key = S.Identity(context.name)
-            if not key or S.db.alts[key] or (S.db.profiles[key] and not S.Eligible(key)) then return end
-            local name = context.name
+            if not key or S.db.alts[key] or (S.db.profiles[key] and not S.Viewable(key)) then return end
+            local name, unit = context.name, context.unit
             root:CreateDivider()
-            root:CreateButton("Open SCS", function() openName(name) end)
+            root:CreateButton("Open SCS", function() S.OpenNamedProfile(name, nil, true, unit) end)
         end)
     end
     for _, kind in ipairs({"PLAYER", "TARGET", "FOCUS", "PARTY", "RAID_PLAYER", "RAID"}) do

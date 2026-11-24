@@ -99,7 +99,7 @@ function S.Now()
 end
 
 local function validReviewContent(record)
-    if record.deleted == true then return record.level60 == true and record.stars == nil and record.text == nil end
+    if record.deleted == true then return record.stars == nil and record.text == nil end
     return record.deleted == nil and type(record.stars) == "number" and record.stars >= 0 and record.stars <= 5
         and (record.stars * 2) % 1 == 0 and S.ValidText(record.text)
 end
@@ -122,7 +122,7 @@ end
 
 function S.Merge(record, direct)
     if not S.ValidRecord(record) or S.db.alts[record.subject] then return end
-    if record.level60 and record.stars == 0 and S.db.alts[record.author] then
+    if record.stars == 0 and S.db.alts[record.author] then
         S.db.zeroSubjects[record.subject] = true
     end
     local rows = S.db.reviews[record.subject]
@@ -148,6 +148,7 @@ function S.Merge(record, direct)
         S.db.authored[record.subject] = record.author
     end
     if S.Refresh then S.Refresh(S.openSubject) end
+    if S.RefreshPlayerHistory and S.me and record.author == S.me.key then S.RefreshPlayerHistory() end
     return record
 end
 
@@ -155,7 +156,7 @@ function S.ReviewAverage(key)
     local count, total = 0, 0
     if not key or S.db.alts[key] then return count end
     for _, record in pairs(S.db.reviews[key] or {}) do
-        if record.level60 and not record.deleted then count, total = count + 1, total + record.stars end
+        if not record.deleted then count, total = count + 1, total + record.stars end
     end
     return count, count >= 5 and total / count or nil
 end
@@ -184,6 +185,12 @@ function S.Tier(score)
     return "Iron"
 end
 
+function S.Viewable(key)
+    local profile = key and S.db and S.db.profiles[key]
+    return profile and profile.faction == S.faction and (profile.level == nil
+        or (type(profile.level) == "number" and profile.level >= 1 and profile.level <= 60))
+end
+
 function S.Eligible(key)
     local profile = key and S.db and S.db.profiles[key]
     return profile and profile.level == 60 and profile.faction == S.faction
@@ -192,6 +199,10 @@ end
 function S.Remember(profile)
     local old = S.db.profiles[profile.key]
     if old and profile.guild == nil then profile.guild = old.guild end
+    if old and old.faction == profile.faction then
+        if profile.level == nil then profile.level = old.level end
+        if profile.class == nil then profile.class = old.class end
+    end
     S.db.profiles[profile.key] = profile
     S.db.names[profile.key] = profile.name
     if S.BlackMarksChanged and (not old or old.level ~= profile.level or old.faction ~= profile.faction) then
@@ -202,12 +213,13 @@ function S.Remember(profile)
 end
 
 local function saveReview(subject, stars, body, deleting, expectedRevision)
-    if not S.me or not S.Eligible(subject) or S.db.alts[subject] then return end
+    if not S.me or not S.Viewable(subject) or S.db.alts[subject] then return end
     local author = S.db.authored[subject]
     if author and author ~= S.me.key then return end
     local old = (S.db.reviews[subject] or {})[S.me.key]
     if deleting and (not old or old.deleted or old.revision ~= expectedRevision) then return end
     local now = S.Now()
+    -- Keep the legacy record field for older versions that read the same SavedVariables.
     local record = S.Merge({subject = subject, subjectName = S.db.names[subject],
         author = S.me.key, name = S.me.name, stars = stars, text = body, time = now, level60 = true, deleted = deleting,
         revision = math.max(now, old and old.revision + 1 or 1)}, true)
@@ -224,10 +236,11 @@ function S.DeleteReview(subject, revision)
 end
 
 local fields = {"alts", "names", "authored", "reviews", "stats", "synced", "deliveries", "profiles",
-    "groupSeen", "groupClears", "zeroSubjects", "talentContexts", "buildClears", "reviewRetractions"}
+    "recentPlayers", "historyMinimap", "groupSeen", "groupClears", "zeroSubjects", "talentContexts", "buildClears", "reviewRetractions"}
 
 local function activate(level)
-    if S.me or (level or S.Call(UnitLevel, "player")) ~= 60 then return end
+    level = level or S.Call(UnitLevel, "player")
+    if S.me or type(level) ~= "number" or level < 1 or level > 60 then return end
     local primary = type(SocialCreditDB) == "table" and SocialCreditDB.version == 1 and SocialCreditDB or {}
     local backup = type(SocialCreditBackup) == "table" and SocialCreditBackup.version == 1 and SocialCreditBackup or {}
     S.db = {version = 1}
@@ -246,7 +259,7 @@ local function activate(level)
         return
     end
     S.db.alts[S.me.key] = true
-    S.me.level = 60
+    S.me.level = level
     S.Remember(S.me)
     for _, store in ipairs({backup.reviews or {}, primary.reviews or {}}) do
         if type(store) == "table" then
@@ -268,8 +281,38 @@ function S.OnActive(callback)
     table.insert(S.events.SCS_ACTIVE, callback)
 end
 
-S.On("PLAYER_LOGIN", function() activate() end)
-S.On("PLAYER_LEVEL_UP", function(level) if S.Readable(level) then activate(level) end end)
+local function startLevel60()
+    for _, callback in ipairs(S.events.SCS_LEVEL_60 or {}) do callback() end
+end
+
+function S.OnLevel60(callback)
+    S.events.SCS_LEVEL_60 = S.events.SCS_LEVEL_60 or {}
+    table.insert(S.events.SCS_LEVEL_60, callback)
+end
+
+S.On("PLAYER_LOGIN", function()
+    if S.me then return end
+    activate()
+    if S.me and S.me.level == 60 then startLevel60() end
+end)
+
+S.On("PLAYER_LEVEL_UP", function(level)
+    if not S.Readable(level) or type(level) ~= "number" or level < 1 or level > 60 then return end
+    local previous = S.me and S.me.level
+    if not S.me then
+        activate(level)
+    else
+        -- Replace the profile so Remember can compare it with the previous level.
+        local profile = S.Copy(S.me)
+        profile.level = level
+        S.me = profile
+        S.Remember(profile)
+    end
+    if not S.me then return end
+    if level == 60 and previous ~= 60 then startLevel60() end
+    if S.AdvertiseLevel then S.AdvertiseLevel() end
+    if S.Refresh then S.Refresh(S.openSubject) end
+end)
 
 S.On("PLAYER_LOGOUT", function()
     if S.me then SocialCreditBackup = S.Copy(S.db) end

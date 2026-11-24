@@ -37,7 +37,7 @@ end
 local gearQueued
 local function scanEquipment()
     gearQueued = nil
-    if not stats or InCombatLockdown() then return end
+    if not stats then return end
     local total, incomplete = 0, false
     local _, class = S.Call(UnitClass, "player")
     local ranged = S.Call(GetInventoryItemID, "player", 18)
@@ -243,7 +243,7 @@ local function addBuildRate(runState, subject, build, offset, rate, seconds)
 end
 
 local function finalize()
-    if not stats or InCombatLockdown() or instance() ~= meterContext then return end
+    if not stats or instance() ~= meterContext then return end
     local types = Enum and Enum.DamageMeterType
     if not types then return end
     for id, sample in pairs(pending) do
@@ -469,8 +469,7 @@ S.On("TIME_PLAYED_MSG", function(seconds)
     stats.played = seconds
 end)
 
-S.OnActive(function()
-    if not S.me then return end
+S.OnLevel60(function()
     stats = S.db.stats[S.me.key] or {rates = {}}
     S.db.stats[S.me.key] = stats
     if not stats.level60Since then

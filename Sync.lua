@@ -5,23 +5,96 @@ local requests, cursors, incoming, served = {}, {}, {}, {}
 local messageID, timer, head, tail = 0, nil, 1, 0
 local nextHello = 0
 local maxPeers, maxQueue = 64, 256
+local peerLifetime, discoveryCooldown = 150, 90
+local offlineUntil, lastWhisper = {}, {}
+local presence, presenceAt
 local channelName
 local groupRequests, groupCooldowns, lookups = {}, {}, {}
 local lookupTimer
 local talentPublish
 
 local function blocked()
-    return InCombatLockdown() or IsInInstance()
-        or (C_ChatInfo.InChatMessagingLockdown and C_ChatInfo.InChatMessagingLockdown())
+    return S.Call(C_ChatInfo.InChatMessagingLockdown) == true
 end
+
+local function onlineStatus(key)
+    local now = GetTime()
+    if not presenceAt or presenceAt <= now then
+        presence, presenceAt = {}, now + 1
+        local function note(name, online)
+            if not S.Readable(online) or type(online) ~= "boolean" then return end
+            local id = S.Identity(name)
+            if id and presence[id] ~= true then presence[id] = online end
+        end
+        local friends = C_FriendList
+        for i = 1, friends and S.Call(friends.GetNumFriends) or 0 do
+            local info = S.Call(friends.GetFriendInfoByIndex, i)
+            if info then note(info.name, info.connected) end
+        end
+        for i = 1, S.Call(IsInGuild) and (S.Call(GetNumGuildMembers) or 0) or 0 do
+            local name, _, _, _, _, _, _, _, online = S.Call(GetGuildRosterInfo, i)
+            note(name, online)
+        end
+        local raid = S.Call(IsInRaid)
+        for i = 1, S.Call(raid and GetNumGroupMembers or GetNumSubgroupMembers) or 0 do
+            local unit = (raid and "raid" or "party") .. i
+            local profile = S.Unit(unit, true)
+            if profile then note(profile.name, S.Call(UnitIsConnected, unit)) end
+        end
+    end
+    return presence[key]
+end
+
+local function canWhisper(key, discovery)
+    local peer = peers[key]
+    return (offlineUntil[key] or 0) <= GetTime() and onlineStatus(key) ~= false
+        and (discovery or (peer and GetTime() - peer.seen <= peerLifetime))
+end
+
+local function markOffline(key)
+    offlineUntil[key] = GetTime() + discoveryCooldown
+    peers[key] = nil
+    for requestKey in pairs(cursors) do
+        if requestKey:sub(1, #key + 1) == key .. "~" then
+            cursors[requestKey], groupCooldowns[requestKey] = nil, nil
+        end
+    end
+    if S.ProfileLookupOffline then S.ProfileLookupOffline(key) end
+end
+
+for _, event in ipairs({"GROUP_ROSTER_UPDATE", "FRIENDLIST_UPDATE", "GUILD_ROSTER_UPDATE"}) do
+    S.On(event, function() presenceAt = nil end)
+end
+
+S.On("CHAT_MSG_SYSTEM", function(message)
+    local format = ERR_CHAT_PLAYER_NOT_FOUND_S
+    if type(format) ~= "string" or not S.Readable(message) or type(message) ~= "string" then return end
+    local before, after = format:match("^(.-)%%s(.*)$")
+    if not before then return end
+    local function escape(value) return value:gsub("(%W)", "%%%1") end
+    local key = S.Identity(message:match("^" .. escape(before) .. "(.+)" .. escape(after) .. "$"))
+    if key and lastWhisper[key] and GetTime() - lastWhisper[key] <= 5 then markOffline(key) end
+end)
 
 local function pump()
     timer = nil
     if head > tail then head, tail = 1, 0; return end
-    if blocked() then timer = C_Timer.NewTimer(2, pump); return end
     local item = queue[head]
-    local ok, result = pcall(C_ChatInfo.SendAddonMessage, prefix, item.body, item.route, item.address)
+    local current = GetTime() <= item.expires
+    if current and blocked() then timer = C_Timer.NewTimer(2, pump); return end
+    local ok, result
+    if current and (not item.key or canWhisper(item.key, item.discovery)) then
+        if item.key then lastWhisper[item.key] = GetTime() end
+        ok, result = pcall(C_ChatInfo.SendAddonMessage, prefix, item.body, item.route, item.address)
+    end
     local codes = Enum and Enum.SendAddonMessageResult
+    if ok and codes and codes.AddOnMessageLockdown and S.Readable(result)
+        and result == codes.AddOnMessageLockdown then
+        timer = C_Timer.NewTimer(2, pump)
+        return
+    end
+    if item.key and ok and codes and codes.TargetOffline and S.Readable(result)
+        and result == codes.TargetOffline then markOffline(item.key) end
     local throttled = ok and codes and S.Readable(result)
         and (result == codes.AddonMessageThrottle or (codes.ChannelThrottle and result == codes.ChannelThrottle))
     if throttled and item.attempts < 3 then
@@ -33,7 +106,7 @@ local function pump()
     timer = C_Timer.NewTimer(0.16, pump)
 end
 
-local function send(body, route, address)
+local function send(body, route, address, key, discovery)
     local chunks, offset = {}, 1
     while offset <= #body do
         local last = math.min(offset + 199, #body)
@@ -51,21 +124,16 @@ local function send(body, route, address)
     for i, chunk in ipairs(chunks) do
         local packet = ("%d:%d:%d:%s"):format(messageID, i, parts, chunk)
         tail = tail + 1
-        queue[tail] = {body = packet, route = route, address = address, attempts = 0}
+        queue[tail] = {body = packet, route = route, address = address, attempts = 0,
+            key = key, discovery = discovery, expires = GetTime() + (discovery and discoveryCooldown or 45)}
     end
     if not timer then timer = C_Timer.NewTimer(0, pump) end
     return true
 end
 
 local function whisper(key, body, excluded)
-    if key == excluded or S.db.alts[key] then return end
-    local peer = peers[key]
-    local address = peer and peer.address
-    if not address then
-        local _, _, target = S.Identity(S.db.names[key])
-        address = target
-    end
-    if address then return send(body, "WHISPER", address) end
+    if key == excluded or S.db.alts[key] or not canWhisper(key) then return end
+    return send(body, "WHISPER", peers[key].address, key)
 end
 
 local function reviewPayload(record)
@@ -74,7 +142,6 @@ local function reviewPayload(record)
 end
 
 local function deliver(key, record, relayed)
-    if not record.level60 then return end
     return whisper(key, (relayed and "W~" or "R~") .. reviewPayload(record), record.subject)
 end
 
@@ -86,7 +153,7 @@ end
 local function deliverGuildReview(key, subject)
     local record = (S.db.reviews[subject] or {})[S.me.key]
     local profile = S.db.profiles[subject]
-    if not record or not record.level60 or not S.Eligible(subject)
+    if not record or not S.Eligible(subject)
         or not profile.class or not profile.class:match("^[A-Z]+$") then return end
     local acks = S.db.deliveries[S.Fingerprint(record)]
     if acks and acks[key] then return end
@@ -105,7 +172,7 @@ local function backupToPeer(key, cap)
     if S.db.alts[key] then return end
     for subject, author in pairs(S.db.authored) do
         local record = (S.db.reviews[subject] or {})[author]
-        if author == S.me.key and record and record.level60 and subject ~= key then
+        if author == S.me.key and record and subject ~= key then
             -- Only acknowledged direct copies count toward the replication target.
             local acks = S.db.deliveries[S.Fingerprint(record)] or {}
             local count = 0
@@ -154,7 +221,7 @@ local function introduction(kind)
     local profile = S.db.profiles[S.me.key]
     local guild = profile.guild
     if guild and (#guild > 120 or guild:find("[~|%c]")) then guild = nil end
-    return table.concat({kind, S.faction, "60", profile.class or "", guild == nil and "?" or guild}, "~")
+    return table.concat({kind, S.faction, profile.level, profile.class or "", guild == nil and "?" or guild}, "~")
 end
 
 local function hello()
@@ -174,6 +241,13 @@ local function hello()
     elseif IsInGroup() then advertise("PARTY") end
     local channel = channelName and S.Call(GetChannelName, channelName)
     if type(channel) == "number" and channel > 0 then advertise("CHANNEL", tostring(channel)) end
+end
+
+function S.AdvertiseLevel()
+    nextHello = 0
+    hello()
+    local greeting = introduction("H")
+    for key in pairs(peers) do whisper(key, greeting) end
 end
 
 function S.PublishTalentContext()
@@ -201,10 +275,10 @@ end
 local function fresh(key, subject)
     local requestKey = key .. "~" .. subject
     if (cursors[requestKey] or 0) > GetTime() then return end
-    if not peers[key] then whisper(key, introduction("H")) end
+    if not canWhisper(key) then return end
     request(key, subject)
     cursors[requestKey] = GetTime() + 30
-    if key == subject and (groupCooldowns[requestKey] or 0) <= GetTime() and requestGroup(key, subject) then
+    if key == subject and S.Eligible(subject) and (groupCooldowns[requestKey] or 0) <= GetTime() and requestGroup(key, subject) then
         groupCooldowns[requestKey] = GetTime() + 180
     end
 end
@@ -256,19 +330,24 @@ function S.FindProfile(name)
     if not key or S.db.alts[key] then return end
     S.LookupGroupProfile(key, true)
     local requestKey = "profile~" .. key
-    if (cursors[requestKey] or 0) <= GetTime()
-        and send(introduction("H"), "WHISPER", address) then
-        cursors[requestKey] = GetTime() + 30
+    if onlineStatus(key) == false then return "Player is offline. Checking synced profiles." end
+    if (cursors[requestKey] or 0) > GetTime() then return "Waiting for a profile reply." end
+    if canWhisper(key, true) and send(introduction("H"), "WHISPER", address, key, true) then
+        cursors[requestKey] = GetTime() + discoveryCooldown
+        return "Looking up a same-faction profile..."
     end
+    return "Checking synced profiles."
 end
 
 function S.Query(subject)
-    if not S.Eligible(subject) or S.db.alts[subject] then return end
+    if not S.Viewable(subject) or S.db.alts[subject] then return end
     hello()
-    S.LookupGroupProfile(subject, true)
+    if S.Eligible(subject) then S.LookupGroupProfile(subject, true) end
     fresh(subject, subject)
     local candidates = {}
-    for key in pairs(peers) do if key ~= subject then table.insert(candidates, key) end end
+    for key in pairs(peers) do
+        if key ~= subject and canWhisper(key) then candidates[#candidates + 1] = key end
+    end
     table.sort(candidates, function(a, b)
         local first, second = peers[a].queried or 0, peers[b].queried or 0
         if first == second then return a < b end
@@ -318,7 +397,7 @@ end
 local function answer(key, subject, cursor)
     if key == subject then return end
     if subject == S.me.key then
-        local stats = S.ExportStats(true)
+        local stats = S.Eligible(subject) and S.ExportStats(true)
         if stats and whisper(key, "J~" .. stats) then
             whisper(key, "G~" .. S.ExportReviewsGiven())
             whisper(key, "K~" .. S.ExportNeedGreed())
@@ -331,7 +410,7 @@ local function answer(key, subject, cursor)
     local rows = S.db.reviews[subject] or {}
     local authors = {}
     for author, record in pairs(rows) do
-        if record.level60 and record.direct and author > cursor then table.insert(authors, author) end
+        if record.direct and author > cursor then table.insert(authors, author) end
     end
     table.sort(authors)
     local last
@@ -342,7 +421,7 @@ local function answer(key, subject, cursor)
     whisper(key, "E~" .. subject .. "~" .. (#authors > 8 and last or ""))
 end
 
-local function review(kind, body, key, class)
+local function review(kind, body, key)
     local subject, subjectName, author, name, revision, stamp, stars, comment =
         body:match("^([^~]+)~([^~]+)~([^~]+)~([^~]+)~(%d+)~(%d+)~([^~]+)~(.*)$")
     local deleted = stars == "-" and comment == ""
@@ -355,10 +434,6 @@ local function review(kind, body, key, class)
         if author ~= key then return end
         local accepted = S.Merge(record, true)
         if accepted and accepted.revision == record.revision then
-            if class and not S.db.profiles[subject] then
-                S.Remember({key = subject, name = subjectName, class = class, faction = S.faction, level = 60})
-                if S.OpenDiscoveredProfile then S.OpenDiscoveredProfile(subject) end
-            end
             whisper(key, "A~" .. subject .. "~" .. revision, subject)
         end
     elseif author ~= key and (requests[key .. "~" .. subject] or 0) >= GetTime() then
@@ -380,12 +455,17 @@ end
 local function receive(body, route, key, address)
     local kind, data = body:match("^([A-Z])~(.*)$")
     if kind == "H" or kind == "I" then
-        local faction, class, guild = data:match("^([^~]+)~60~([A-Z]+)~([^~]*)$")
-        if faction ~= S.faction or not class or #class > 24 or #guild > 120 or guild:find("[|%c]") then return end
+        local faction, levelText, class, guild = data:match("^([^~]+)~(%d%d?)~([A-Z]+)~([^~]*)$")
+        local level = tonumber(levelText)
+        if faction ~= S.faction or not level or level < 1 or level > 60
+            or #class > 24 or #guild > 120 or guild:find("[|%c]") then return end
         local target = S.Unit("target")
-        if target and target.key == key and target.level and target.level > 0 and target.level ~= 60 then return end
+        local observed = target and target.key == key and target.level and target.level > 0 and target.level
+        local peer = peers[key]
+        if observed and observed ~= level then return end
+        if not observed and peer and peer.level and level < peer.level then return end
         local _, display = S.Identity(address)
-        S.Remember({key = key, level = 60, class = class, faction = faction,
+        S.Remember({key = key, level = level, class = class, faction = faction,
             name = display, guild = guild ~= "?" and guild or nil})
         local new = not peers[key]
         if new then
@@ -397,7 +477,12 @@ local function receive(body, route, key, address)
             if count >= maxPeers then peers[oldest] = nil end
         end
         peers[key] = peers[key] or {}
-        peers[key].address, peers[key].seen = address, GetTime()
+        peers[key].address, peers[key].seen, peers[key].level = address, GetTime(), level
+        offlineUntil[key] = nil
+        presenceAt = nil
+        onlineStatus(key)
+        presence[key] = true
+        if S.QueuePlayerHistoryRefresh then S.QueuePlayerHistoryRefresh() end
         if S.OpenDiscoveredProfile then S.OpenDiscoveredProfile(key) end
         if kind == "H" and (new or route == "WHISPER") then whisper(key, introduction("I")) end
         if new then fresh(key, key) end
@@ -419,7 +504,7 @@ local function receive(body, route, key, address)
     if route ~= "WHISPER" or not peers[key] then return end
     if kind == "B" and guildMember(key) then
         local class, record = data:match("^([A-Z]+)~(.*)$")
-        if class and #class <= 24 then review("R", record, key, class) end
+        if class and #class <= 24 then review("R", record, key) end
         return
     end
     if kind == "X" or kind == "M" or kind == "T" or kind == "V" or kind == "U" or kind == "D" then
@@ -433,6 +518,7 @@ local function receive(body, route, key, address)
             local servedKey = "X~" .. requestKey .. "~" .. value
             if (served[servedKey] or 0) > GetTime() then return end
             served[servedKey] = GetTime() + 10
+            if not S.Eligible(S.me.key) then return end
             if subject == S.me.key then answerOwnerCombat(key, subject, value)
             else answerGroup(key, subject, value) end
         elseif (groupRequests[requestKey] or -1) >= GetTime() then
@@ -479,7 +565,7 @@ end
 
 S.On("CHAT_MSG_ADDON", function(tag, packet, route, sender)
     if not S.me or not S.Readable(tag) or tag ~= prefix or not S.Readable(packet)
-        or not S.Readable(route) or blocked() then return end
+        or not S.Readable(route) then return end
     local key, _, address = S.Identity(sender)
     if not key or S.db.alts[key] or type(packet) ~= "string" or #packet > 220 then return end
     local now = GetTime()
@@ -526,8 +612,12 @@ S.OnActive(function()
         hello()
         local recent = {}
         for key, peer in pairs(peers) do
-            backupToPeer(key, 2)
-            recent[#recent + 1] = key
+            if GetTime() - peer.seen > peerLifetime then
+                peers[key] = nil
+            elseif canWhisper(key) then
+                backupToPeer(key, 2)
+                recent[#recent + 1] = key
+            end
         end
         table.sort(recent, function(a, b) return (peers[a].statsAt or 0) < (peers[b].statsAt or 0) end)
         for i = 1, math.min(4, #recent) do
@@ -536,6 +626,8 @@ S.OnActive(function()
             peers[key].statsAt = GetTime()
         end
         if S.openSubject then S.Query(S.openSubject) end
+        for key, stamp in pairs(lastWhisper) do if GetTime() - stamp > 5 then lastWhisper[key] = nil end end
+        for key, expires in pairs(offlineUntil) do if expires <= GetTime() then offlineUntil[key] = nil end end
         for key, expires in pairs(requests) do if expires < GetTime() then requests[key] = nil end end
         for key, expires in pairs(cursors) do if expires < GetTime() then cursors[key] = nil end end
         for key, expires in pairs(served) do if expires < GetTime() then served[key] = nil end end
@@ -547,25 +639,21 @@ S.OnActive(function()
 end)
 
 S.On("GROUP_ROSTER_UPDATE", function() if S.me then hello() end end)
-S.On("PLAYER_GUILD_UPDATE", function(unit)
-    if S.me and S.Readable(unit) and (not unit or unit == "player") then
-        nextHello = 0
-        hello()
-    end
-end)
 S.On("PLAYER_REGEN_ENABLED", function() if S.me then hello() end end)
-S.On("PLAYER_ENTERING_WORLD", function()
-    if S.me then
-        hello()
-        if S.openSubject then S.Query(S.openSubject) end
-    end
-end)
-
-S.On("PLAYER_GUILD_UPDATE", function()
+local function resumeZoneSync()
     if not S.me then return end
+    hello()
+    if S.openSubject then S.Query(S.openSubject) end
+end
+S.On("PLAYER_ENTERING_WORLD", resumeZoneSync)
+S.On("ZONE_CHANGED_NEW_AREA", resumeZoneSync)
+
+S.On("PLAYER_GUILD_UPDATE", function(unit)
+    if not S.me or not S.Readable(unit) or (unit and unit ~= "player") then return end
     local profile = S.Unit("player", true)
     if profile then
-        profile.level = 60
+        profile.level = S.me.level
+        S.me = profile
         S.Remember(profile)
         nextHello = 0
         hello()

@@ -6,6 +6,7 @@
   <meta name="description" content="Download Social Credit System for World of Warcraft Forever. Read character reviews, compare instance performance, and see scores in Group Finder.">
   <title>Social Credit System · WoW Forever</title>
   <link rel="stylesheet" href="style.css">
+  <script src="updated.js" defer></script>
 </head>
 <body>
   <header class="bar shell">
@@ -24,10 +25,13 @@
         <h1 id="title">Social Credit <em>System</em></h1>
         <p class="intro">Read player reviews, compare dungeon and raid performance, and see Social Credit Scores in Group Finder.</p>
         <div class="actions">
-          <a class="button" href="https://github.com/GM-King/wow_social_credit_score/releases/download/v2.8.0/SocialCreditSystem-2.8.0.zip">Download 2.8.0 <span aria-hidden="true">↓</span></a>
+          <div class="download">
+            <a class="button" href="downloads/SocialCreditSystem-2.9.0.zip" download>Download 2.9.0 <span aria-hidden="true">↓</span></a>
+            <p class="updated">Last updated <time datetime="2026-11-24T08:42:30Z" id="release-updated">24 November 2026</time></p>
+          </div>
           <a href="#install">Installation</a>
         </div>
-        <p class="compat">For same-faction characters at level 60</p>
+        <p class="compat">Browse and review at any level. Scores unlock at level 60.</p>
       </div>
       <img class="hero-art" src="art/guild-archive.webp" alt="An orc archivist records a returning adventuring party in an open ledger" width="1440" height="960" fetchpriority="high">
     </section>
@@ -39,9 +43,9 @@
           <h2 id="install-title">Install the addon</h2>
         </div>
         <ol>
-          <li>Download and extract <strong>SocialCreditSystem-2.8.0.zip</strong>.</li>
+          <li>Download and extract <strong>SocialCreditSystem-2.9.0.zip</strong>.</li>
           <li>Move the extracted <strong>SocialCreditSystem</strong> folder into <code>_forever_/Interface/AddOns/</code>.</li>
-          <li>Enable Social Credit System in the AddOns list. In game, target another eligible character and type <code>/scs</code>.</li>
+          <li>Enable Social Credit System in the AddOns list. In game, click the minimap stamp, type <code>/scs</code> with a player targeted, or right-click a name in chat or the Who list and choose <strong>Open SCS</strong>.</li>
         </ol>
       </div>
     </section>
@@ -74,7 +78,11 @@
           </article>
           <article>
             <h3>Understand the score</h3>
-            <p>Five reviews unlock the star average and a score out of 1000. Reviews contribute 75%. Instance performance contributes 25% and uses the stronger DPS or HPS benchmark for the player’s class, talent tree, tank or non-tank role, and group size. Scores stay provisional while combat data is limited.</p>
+            <p>At level 60, five reviews unlock the star average and a score out of 1000. Reviews received before level 60 count automatically. Reviews contribute 75%. Instance performance contributes 25% and uses the stronger DPS or HPS benchmark for the player’s class, talent tree, tank or non-tank role, and group size. Scores stay provisional while combat data is limited.</p>
+          </article>
+          <article id="whats-new">
+            <h3>New in 2.9.0</h3>
+            <p>The minimap stamp opens Recent and Reviewed. Recent shows up to 100 party, raid, and whisper contacts. Open verified profiles directly from the Who list, and browse profiles and save reviews during combat and in instances.</p>
           </article>
           <article>
             <h3>Blacklist</h3>
@@ -86,8 +94,8 @@
   </main>
 
   <footer class="footer shell">
-    <span>Social Credit System · 2.8.0</span>
-    <a href="https://github.com/GM-King/wow_social_credit_score/releases/tag/v2.8.0">Release notes</a>
+    <span>Social Credit System · 2.9.0</span>
+    <a href="#whats-new">Release notes</a>
     <a href="https://github.com/GM-King/wow_social_credit_score/issues">Report an issue</a>
   </footer>
 </body>

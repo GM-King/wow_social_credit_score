@@ -24,7 +24,13 @@ end
 function StaticPopup_Hide(which)
     if popup and popup.which == which then popup = nil end
 end
-Menu = {ModifyMenu = function(tag, callback) menus[tag] = callback end}
+Menu = {ModifyMenu = function(tag, callback)
+    local previous = menus[tag]
+    menus[tag] = function(...)
+        if previous then previous(...) end
+        callback(...)
+    end
+end}
 menus = {}
 ChatFrameUtil = {AddSenderNameFilter = function(fn) markSender = fn end}
 date = os.date
@@ -102,6 +108,12 @@ local methods = setmetatable({
     Show = function(self) self.shown = true; if self.OnShow then self:OnShow() end end,
     Hide = function(self) self.shown = false; if self.OnHide then self:OnHide() end end,
     IsVisible = function(self) return self.shown ~= false end,
+    IsShown = function(self) return self.shown ~= false end,
+    GetCenter = function(self) return rawget(self, "x") or 0, rawget(self, "y") or 0 end,
+    SetVerticalScroll = function(self, value)
+        self.offset = value
+        self:OnVerticalScroll(value)
+    end,
     GetStringWidth = function(self) return #(self.text or "") * 6 end,
     GetBottom = function() return 500 end,
     HookScript = function(self, script, fn)
@@ -123,7 +135,9 @@ function CreateFrame(kind, name, parent)
     f.CreateTexture = function(self) return CreateFrame("Texture", nil, self) end
     return f
 end
+function SetPortraitTexture(texture, unit) texture:SetTexture(unit) end
 UIParent = CreateFrame()
+Minimap = CreateFrame()
 C_Timer = {}
 function C_Timer.NewTimer(delay, fn)
     serial = serial + 1
@@ -159,7 +173,7 @@ class Client:
         self.lua.execute(MOCK)
         self.g.level = level
         for file in ("Core.lua", "Score.lua", "GroupStats.lua", "Talents.lua", "CombatBuilds.lua", "Stats.lua", "Sync.lua",
-                     "ReviewRelationships.lua", "BlackMarks.lua", "Profile.lua", "GroupFinder.lua"):
+                     "ReviewRelationships.lua", "BlackMarks.lua", "Who.lua", "Profile.lua", "GroupFinder.lua", "PlayerHistory.lua"):
             source = (ADDON / file).read_text(encoding="utf-8")
             self.lua.eval("function(source) assert(loadstring(source))('SocialCreditSystem',state) end")(source)
         if saved:
@@ -167,9 +181,8 @@ class Client:
         self.g.emit("PLAYER_LOGIN")
         self.s = self.g.state
         if level != 60:
-            assert self.s.me is None
-            self.g.level = 60
-            self.g.emit("PLAYER_LEVEL_UP", 60)
+            assert self.s.me.level == level
+            assert self.s.db.stats[self.s.me.key] is None
         assert self.s.me
         self.name = self.s.me.key
         self.s.Remember(self.s.Unit("target"))
@@ -683,7 +696,7 @@ assert(not badge.shown)
 """)
 
 sizes = {"GuildHall": (1024, 128), "StatsSlate": (256, 512),
-         "BlackMark": (32, 32),
+         "BlackMark": (32, 32), "MinimapStamp": (64, 64),
          "ReviewParchment": (512, 128), "StarFilled": (64, 64), "StarEmpty": (64, 64)}
 for path in (ADDON / "Media").glob("*.tga"):
     data = path.read_bytes()
@@ -763,6 +776,9 @@ second.g.witnessedRun(3, 9000, True)
 assert first.s.ProfileStats(key).runs[5] == second.s.ProfileStats(key).runs[5] == 2
 assert first.s.ProfileStats("remote-adventurer") is None
 now += 320
+advance(observers, 1)
+for observer in observers:
+    observer.g.tickers[60]()
 advance(observers, 5)
 assert viewer.s.LookupGroupProfile(key)
 advance(observers, 12)
@@ -1229,5 +1245,456 @@ if prat_formatter.is_file():
     local _, seals = line:gsub("BlackMark", "")
     assert(seals == 1 and line:find("[|Hplayer:Test-Subject|h|cff11aaaaNick|r|h]: Hi", 1, true))
     """)
+# Reviews from and about leveling players survive syncing and unlock at level 60.
+leveling = Client("Leveling Player", 59)
+viewer = Client("Promotion Viewer")
+reviewers = [Client(f"Leveling {name}", 59 if name == "One" else 60)
+             for name in ("One", "Two", "Three", "Four", "Five")]
+clients = [leveling, viewer, *reviewers]
+advance(clients, 12)
+assert viewer.s.db.profiles[leveling.name].level == 59
+assert leveling.s.SaveReview(viewer.name, 4.5, "Review from level 59")
+for reviewer in reviewers:
+    assert reviewer.s.SaveReview(leveling.name, 4, "Before level 60")
+advance(clients, 12)
+assert any(
+    witness.s.db.reviews[viewer.name] and witness.s.db.reviews[viewer.name][leveling.name]
+    and witness.s.db.reviews[viewer.name][leveling.name].stars == 4.5
+    for witness in reviewers
+)
+viewer.g.SlashCmdList.SOCIALCREDITSYSTEM("Leveling Player")
+advance(clients, 12)
+assert viewer.s.ReviewAverage(leveling.name) == (5, 4)
+assert viewer.s.RatingSummary(leveling.name) is None
+p = viewer.g.SocialCreditSystemProfile
+assert p.score.text == "SCS unlocks at level 60" and p.reviewMean.text == "5 reviews"
+
+edited = reviewers[0].s.SaveReview(leveling.name, 5, "Amended before level 60")
+assert edited
+removed = reviewers[-1].s.db.reviews[leveling.name][reviewers[-1].name]
+assert reviewers[-1].s.DeleteReview(leveling.name, removed.revision)
+advance(clients, 30)
+viewer.s.Query(leveling.name)
+advance(clients, 12)
+assert viewer.s.ReviewAverage(leveling.name) == (4, None)
+# Older SavedVariables can contain reviews without the legacy level-60 flag.
+viewer.s.db.reviews[leveling.name][reviewers[1].name].level60 = None
+viewer.g.emit("PLAYER_LOGOUT")
+viewer.s.me = None
+viewer.g.emit("PLAYER_LOGIN")
+assert viewer.s.ReviewAverage(leveling.name) == (4, None)
+
+leveling.g.level = 60
+leveling.g.emit("PLAYER_LEVEL_UP", 60)
+assert leveling.s.db.stats[leveling.name].level60Since
+advance(clients, 12)
+assert viewer.s.Eligible(leveling.name)
+assert viewer.s.RatingSummary(leveling.name) == (4, None)
+assert reviewers[-1].s.SaveReview(leveling.name, 3, "Fresh review")
+advance(clients, 30)
+viewer.s.Query(leveling.name)
+advance(clients, 12)
+count, mean, score, *_ = viewer.s.RatingSummary(leveling.name)
+assert count == 5 and mean == 4 and score is not None
+
+viewer.lua.execute("""
+local S, p = state, SocialCreditSystemProfile
+function InCombatLockdown() return true end
+p.close.OnClick()
+assert(not p:IsVisible() and not S.openSubject)
+SlashCmdList.SOCIALCREDITSYSTEM("Leveling Player")
+p.edit.OnClick()
+p.editor.zero.OnClick()
+p.editor.save.OnClick()
+assert(popup)
+for _, child in ipairs(p.editorShade.children) do
+    if child.kind == "Button" then child.OnClick() end
+end
+assert(not p:IsVisible() and not p.editorShade:IsVisible() and not popup and not S.openSubject)
+SlashCmdList.SOCIALCREDITSYSTEM("Leveling Player")
+p.edit.OnClick()
+local function escape(frame)
+    if frame.OnEscapePressed ~= nil and frame.kind == "EditBox" then
+        frame:OnEscapePressed()
+        return
+    end
+    for _, child in ipairs(frame.children) do escape(child) end
+end
+escape(p.editorShade)
+assert(not p:IsVisible() and not S.openSubject)
+function InCombatLockdown() return false end
+emit("PLAYER_REGEN_ENABLED")
+assert(not p:IsVisible())
+""")
+# Character-specific minimap history and navigation through the real window scripts.
+history = Client("History Tester", 59)
+history.lua.execute("""
+local S = state
+local unitName, unitLevel = UnitName, UnitLevel
+local raid, grouped = false, true
+function IsInRaid() return raid end
+function GetNumGroupMembers() return grouped and 2 or 0 end
+function GetNumSubgroupMembers() return grouped and 1 or 0 end
+function UnitName(unit)
+    if unit == "party1" or unit == "raid2" then return "Group Contact" end
+    if unit == "raid1" then return character end
+    return unitName(unit)
+end
+UnitFullName = UnitName
+function UnitLevel(unit)
+    if unit == "party1" or unit == "raid2" then return 48 end
+    return unitLevel(unit)
+end
+emit("GROUP_ROSTER_UPDATE")
+local recent = S.db.recentPlayers[S.me.key]
+assert(#recent == 1 and recent[1].interaction == "Group")
+local first = recent[1]
+raid = true
+emit("GROUP_ROSTER_UPDATE")
+emit("GROUP_ROSTER_UPDATE")
+assert(recent[1] == first and #recent == 1)
+grouped = false
+emit("GROUP_ROSTER_UPDATE")
+grouped = true
+emit("GROUP_ROSTER_UPDATE")
+assert(recent[1] ~= first and #recent == 1)
+emit("CHAT_MSG_WHISPER_INFORM", "private", "Group-Contact")
+assert(#recent == 1 and recent[1].interaction == "Whisper" and recent[1].message == nil)
+for i = 1, 101 do emit("CHAT_MSG_WHISPER", "private", "Whisper " .. string.char(64 + math.ceil(i / 26), 65 + i % 26)) end
+assert(#recent == 100 and recent[100].key ~= "group-contact")
+emit("CHAT_MSG_WHISPER", "private", "Group-Contact")
+assert(#recent == 100 and recent[1].key == "group-contact")
+assert(S.SaveReview("group-contact", 4, ""))
+local icon = SocialCreditSystemMinimapButton
+icon:OnMouseDown()
+icon:OnDragStart()
+icon.x, icon.y = 12, 30
+icon:OnDragStop()
+icon:OnClick()
+assert(not SocialCreditSystemHistory and S.db.historyMinimap.x == 12)
+icon:OnMouseDown()
+icon:OnClick()
+local list = SocialCreditSystemHistory
+assert(list.rows[1].entry.key == "group-contact")
+assert(list.rows[1].portrait.texture == "raid2" and list.rows[1].border.texture:match("Neutral$"))
+assert(list.rows[1].metadata.text == "Level 48  " .. string.char(226,128,162) .. "  Warrior  "
+    .. string.char(226,128,162) .. "  Example Guild")
+assert(list.rows[1].score.text == "Unlocks at level 60")
+emit("CHAT_MSG_WHISPER", "private", "Unknown Contact")
+list.rows[1]:OnClick()
+assert(list:IsShown() and not S.openSubject)
+S.Remember({key = "unknown-contact", name = "Unknown Contact", level = 48, faction = S.faction})
+S.OpenDiscoveredProfile("unknown-contact")
+assert(not list:IsShown() and S.openSubject == "unknown-contact")
+SocialCreditSystemProfile.back:OnClick()
+assert(list:IsShown() and list.rows[1].entry.key == "unknown-contact")
+list.Reviewed:OnClick()
+assert(list.rows[1].entry.subject == "group-contact" and not list.rows[2].entry)
+list.rows[1]:OnClick()
+assert(not list:IsShown() and S.openSubject == "group-contact")
+SocialCreditSystemProfile.back:OnClick()
+assert(list:IsShown() and list.rows[1].entry.subject == "group-contact")
+assert(S.SaveReview("group-contact", 2, "edited"))
+assert(list.rows[1].entry.stars == 2)
+assert(S.DeleteReview("group-contact", list.rows[1].entry.revision))
+assert(not list.rows[1].entry)
+for i = 1, 101 do
+    local who = "Review " .. string.char(64 + math.ceil(i / 26), 65 + i % 26)
+    local key = S.Identity(who)
+    S.Remember({key = key, name = who, level = 50, faction = S.faction})
+    assert(S.SaveReview(key, 3, ""))
+end
+list.scroll:SetVerticalScroll(94 * 60)
+assert(list.rows[7].entry and not list.rows[8].entry)
+local subject = list.rows[7].entry.subject
+list.rows[7]:OnClick()
+assert(S.openSubject == subject)
+SocialCreditSystemProfile.back:OnClick()
+assert(list.rows[7].entry.subject == subject)
+function InCombatLockdown() return true end
+icon:OnClick()
+assert(not list:IsShown())
+emit("PLAYER_LOGOUT")
+S.me = nil
+emit("PLAYER_LOGIN")
+assert(#S.db.recentPlayers[S.me.key] == 100 and S.db.historyMinimap.y == 30)
+local previousKey = S.me.key
+character = "Other Character"
+S.me = nil
+emit("PLAYER_LOGIN")
+assert(S.db.recentPlayers[S.me.key] == nil and #S.db.recentPlayers[previousKey] == 100)
+""")
+restored = Client("History Tester", 59, saved="""
+SocialCreditDB = {version = 1, historyMinimap = {x = 12, y = 30}, recentPlayers = {
+    ["history-tester"] = {{key = "group-contact", name = "Group Contact", interaction = "Group", time = GetServerTime()}}
+}}
+""")
+restored.lua.execute("""
+local icon = SocialCreditSystemMinimapButton
+assert(icon.point[4] == 12 and icon.point[5] == 30)
+icon:OnClick()
+assert(SocialCreditSystemHistory.rows[1].entry.key == "group-contact")
+""")
+offline = Client("Offline Tester")
+offline.lua.execute("""
+local S = state
+local name, key = "Departing Player", "departing-player"
+local rosterOnline = false
+local attempts, online = 0, false
+Enum.SendAddonMessageResult.TargetOffline = 99
+ERR_CHAT_PLAYER_NOT_FOUND_S = "No player named '%s' is currently playing."
+function GetNumGuildMembers() return rosterOnline ~= nil and 1 or 0 end
+function GetGuildRosterInfo() return name, nil, nil, nil, nil, nil, nil, nil, rosterOnline end
+C_ChatInfo.SendAddonMessage = function(_, _, route, address)
+    if route == "WHISPER" and S.Identity(address) == key then
+        attempts = attempts + 1
+        return online and 0 or Enum.SendAddonMessageResult.TargetOffline
+    end
+    return 0
+end
+S.Remember({key = key, name = name, level = 60, class = "WARRIOR", faction = S.faction})
+emit("CHAT_MSG_WHISPER", "", name)
+SocialCreditSystemMinimapButton:OnClick()
+local list = SocialCreditSystemHistory
+list.scroll:SetVerticalScroll(0)
+assert(attempts == 0)
+list.rows[1]:OnClick()
+assert(S.openSubject == key)
+for i = 1, 40 do tick(clock + .2) end
+tickers[60]()
+for i = 1, 40 do tick(clock + .2) end
+assert(attempts == 0)
+
+-- A greeting can arrive immediately before logout. The first offline send drops the rest of the queue.
+rosterOnline = nil
+emit("GUILD_ROSTER_UPDATE")
+emit("CHAT_MSG_ADDON", "SocialCredit2", "990:1:1:H~Horde~60~WARRIOR~", "GUILD", name)
+for i = 1, 40 do tick(clock + .2) end
+assert(attempts == 1)
+tickers[60]()
+for i = 1, 40 do tick(clock + .2) end
+assert(attempts == 1)
+
+-- A fresh greeting lifts the offline cooldown.
+online = true
+local before = attempts
+tick(clock + 31)
+emit("CHAT_MSG_ADDON", "SocialCredit2", "991:1:1:H~Horde~60~WARRIOR~", "GUILD", name)
+for i = 1, 40 do tick(clock + .2) end
+assert(attempts > before)
+
+-- An explicit unknown profile sends just the greeting, even after repeated clicks.
+name, key = "Unknown Player", "unknown-player"
+online = false
+attempts = 0
+emit("CHAT_MSG_WHISPER", "", name)
+SocialCreditSystemProfile.back:OnClick()
+list.rows[1]:OnClick()
+list.rows[1]:OnClick()
+for i = 1, 40 do tick(clock + .2) end
+assert(attempts == 1 and list.status.text:match("offline"))
+
+-- Some clients surface offline delivery through the localized system event.
+name, key = "System Player", "system-player"
+attempts = 0
+C_ChatInfo.SendAddonMessage = function(_, _, route, address)
+    if route == "WHISPER" and S.Identity(address) == key then
+        attempts = attempts + 1
+        emit("CHAT_MSG_SYSTEM", ERR_CHAT_PLAYER_NOT_FOUND_S:format(name))
+    end
+    return 0
+end
+emit("CHAT_MSG_ADDON", "SocialCredit2", "992:1:1:H~Horde~60~WARRIOR~", "GUILD", name)
+for i = 1, 40 do tick(clock + .2) end
+assert(attempts == 1)
+""")
+# Combat and instances alone do not block score generation, sync, or local review actions.
+fighter, witness = Client("Combat Reviewer"), Client("Combat Witness")
+for client in (fighter, witness):
+    client.lua.execute("""
+    function InCombatLockdown() return true end
+    function IsInInstance() return true end
+    """)
+advance([fighter, witness], 12)
+key = "test-subject"
+assert fighter.s.SaveReview(key, 4, "Saved in combat")
+advance([fighter, witness], 8)
+assert witness.s.db.reviews[key][fighter.name].stars == 4
+fighter.lua.execute("""
+local S, key = state, "test-subject"
+for _, name in ipairs({"First", "Second", "Third", "Fourth"}) do
+    assert(S.Merge({subject = key, subjectName = "Test Subject",
+        author = name:lower() .. "-tester", name = name .. " Tester",
+        stars = 4, time = S.Now(), revision = S.Now(), text = ""}, true))
+end
+S.InvalidateScores()
+assert(select(3, S.RatingSummary(key)))
+SlashCmdList.SOCIALCREDITSYSTEM("")
+assert(SocialCreditSystemProfile.score.text:match("SCS"))
+SocialCreditSystemProfile.close:OnClick()
+assert(not SocialCreditSystemProfile:IsShown())
+""")
+fighter.lua.execute("""
+local send = C_ChatInfo.SendAddonMessage
+chatLocked, apiLocked, lockResults = true, true, 0
+Enum.SendAddonMessageResult.AddOnMessageLockdown = 11
+C_ChatInfo.InChatMessagingLockdown = function() return chatLocked end
+C_ChatInfo.SendAddonMessage = function(...)
+    if apiLocked then
+        lockResults = lockResults + 1
+        return Enum.SendAddonMessageResult.AddOnMessageLockdown
+    end
+    return send(...)
+end
+""")
+assert fighter.s.SaveReview(key, 5, "Edited while chat is locked")
+advance([fighter, witness], 4)
+assert fighter.g.lockResults == 0 and witness.s.db.reviews[key][fighter.name].stars == 4
+fighter.g.chatLocked = False
+advance([fighter, witness], 4)
+assert fighter.g.lockResults > 0 and witness.s.db.reviews[key][fighter.name].stars == 4
+fighter.g.apiLocked = False
+advance([fighter, witness], 8)
+assert witness.s.db.reviews[key][fighter.name].stars == 5
+# Right-click chat lookup opens immediately even when the client blocks addon messages.
+chat_reader = Client("Chat Reader")
+chat_reader.lua.execute("""
+local S = state
+function InCombatLockdown() return true end
+C_ChatInfo.InChatMessagingLockdown = function() return true end
+local function click(name, unit)
+    local action
+    local menu = {CreateDivider = function() end, CreateButton = function(_, _, fn) action = fn end}
+    menus.MENU_UNIT_FRIEND(nil, menu, {chatFrame = {}, name = name, unit = unit})
+    assert(action)
+    action()
+    return SocialCreditSystemProfile
+end
+local p = click("Young Adventurer")
+assert(p:IsShown() and p.name.text == "Young Adventurer")
+assert(p.score.text == "Same-faction profile unverified" and p.status.text:find("/who", 1, true))
+assert(S.db.profiles["young-adventurer"] == nil and not S.SaveReview("young-adventurer", 5, ""))
+emit("CHAT_MSG_ADDON", "SocialCredit2", "997:1:1:H~Horde~42~WARRIOR~", "GUILD", "Young Adventurer")
+assert(p:IsShown() and not p.preview and p.score.text == "SCS unlocks at level 60")
+assert(S.SaveReview("young-adventurer", 5, ""))
+
+-- A live nameplate can verify faction before the level is readable.
+local originalName, originalLevel = UnitName, UnitLevel
+function UnitName(unit)
+    if unit == "nameplate1" then return "Visible Adventurer" end
+    return originalName(unit)
+end
+UnitFullName = UnitName
+function UnitLevel(unit) if unit ~= "nameplate1" then return originalLevel(unit) end end
+C_NamePlate = {GetNamePlates = function() return {{namePlateUnitToken = "nameplate1"}} end}
+p = click("Visible Adventurer")
+assert(p:IsShown() and not p.preview and p.score.text == "Level unknown")
+assert(p.portrait.texture == "nameplate1" and S.Viewable("visible-adventurer"))
+assert(not S.Eligible("visible-adventurer") and S.SaveReview("visible-adventurer", 4, ""))
+p.close:OnClick()
+assert(not p:IsShown())
+
+-- The native Who list can verify a low-level player without a unit or an addon reply.
+local rows, queries = {}, {}
+C_FriendList = {
+    GetNumWhoResults = function() return #rows, #rows end,
+    GetWhoInfo = function(index) return rows[index] end,
+    SendWho = function(filter) queries[#queries + 1] = filter end,
+}
+p = click("Distant Player")
+assert(p.preview and queries[1] == 'n-"Distant Player"')
+rows = {{fullName = "Distant Players", level = 55, filename = "MAGE"}}
+emit("WHO_LIST_UPDATE")
+assert(p.preview and not S.Viewable("distant-player"))
+rows[2] = {fullName = "Distant-Player-Layer", level = 38, filename = "MAGE", fullGuildName = "Who Guild"}
+emit("WHO_LIST_UPDATE")
+assert(not p.preview and S.db.profiles["distant-player"].level == 38)
+assert(S.db.profiles["distant-player"].class == "MAGE" and p.guild.text == "Who Guild")
+assert(S.SaveReview("distant-player", 4, ""))
+
+-- Short /who results may arrive as localized system chat while the Who panel is shut.
+WHO_LIST_GUILD_FORMAT = "%2$d Level %1$s %3$s %4$s <%5$s> - %6$s"
+WHO_LIST_FORMAT = "%s: Level %d %s %s - %s"
+LOCALIZED_CLASS_NAMES_MALE = {MAGE = "Mage", DEATHKNIGHT = "Death Knight"}
+rows = {}
+p = click("Manual Player")
+assert(p.preview and #queries == 1)
+emit("CHAT_MSG_SYSTEM", "35 Level |Hplayer:Manual-Players:9|h[Manual Players]|h Blood Elf Mage <Guild> - City")
+assert(p.preview)
+emit("CHAT_MSG_SYSTEM", "36 Level |Hplayer:Manual-Player:9|h[Manual Player]|h Blood Elf Death Knight <Guild> - City")
+assert(not p.preview and S.db.profiles["manual-player"].level == 36)
+assert(S.db.profiles["manual-player"].class == "DEATHKNIGHT")
+emit("CHAT_MSG_SYSTEM", "|Hplayer:Cached-Player:9|h[Cached Player]|h: Level 25 Blood Elf Mage - City")
+assert(not click("Cached Player").preview and S.db.profiles["cached-player"].level == 25)
+""")
+chat_reader.lua.execute("""
+local S = state
+local rows = {
+    {fullName = "First Result", level = 34, filename = "MAGE"},
+    {fullName = "Second Result", level = 57, filename = "WARRIOR"},
+}
+C_FriendList.GetWhoInfo = function(index) return rows[index] end
+C_FriendList.GetNumWhoResults = function() return #rows end
+local row = CreateFrame("Button")
+local data = rows[1]
+row.GetElementData = function() return data end
+local root = {
+    CreateDivider = function() end,
+    CreateButton = function(_, label, fn)
+        assert(label == "Open SCS")
+        whoAction = fn
+    end,
+}
+local nativeClicks, fallbackMenus = 0, 0
+row:SetScript("OnMouseUp", function(_, button)
+    if button == "RightButton" then
+        nativeClicks = nativeClicks + 1
+        if data == rows[1] then
+            menus.MENU_UNIT_FRIEND(nil, root, {name = "First Result"})
+        end
+    end
+end)
+MenuUtil = {CreateContextMenu = function(owner, generator)
+    assert(owner == row)
+    fallbackMenus = fallbackMenus + 1
+    generator(owner, root)
+end}
+local initialize
+ScrollUtil = {AddInitializedFrameCallback = function(_, fn, owner)
+    initialize = function(other) fn(owner, other) end
+end}
+LFGWhoListFrame = {ScrollBox = {ForEachFrame = function(_, fn) fn(row) end}}
+emit("ADDON_LOADED", "Blizzard_GroupFinder_VanillaStyle")
+initialize(row)
+row:OnMouseDown("LeftButton")
+row:OnMouseUp("LeftButton")
+tick(clock + .1)
+assert(not whoAction and fallbackMenus == 0)
+row:OnMouseDown("RightButton")
+row:OnMouseUp("RightButton")
+tick(clock + .1)
+assert(whoAction and nativeClicks == 1 and fallbackMenus == 0)
+whoAction()
+assert(S.openSubject == "first-result" and S.db.profiles["first-result"].level == 34)
+
+-- Reused rows still open the character currently displayed, including index-only rows.
+data = {index = 2}
+row.Name = row:CreateFontString()
+row.Name:SetText("Second Result")
+initialize(row)
+whoAction = nil
+row:OnMouseDown("RightButton")
+row:OnMouseUp("RightButton")
+tick(clock + .1)
+assert(whoAction and fallbackMenus == 1)
+whoAction()
+assert(S.openSubject == "second-result" and S.db.profiles["second-result"].level == 57)
+""")
+print("PASS: Who list right-click menu, load-on-demand hooks, and recycled rows")
+print("PASS: chat profile previews, verified low-level players, and unreadable levels during combat")
+print("PASS: combat and instance scores and sync, including client lockdown and retry")
+print("PASS: offline whisper gating, queue cancellation, reconnect, and lookup status")
+print("PASS: minimap history, navigation, whisper and roster deduplication, and active reviews")
+print("PASS: level-60 promotion, pre-60 review sync, and combat close handlers")
 print("PASS: review deletion, backup and reconnect sync, native and Prat chat, half-star layout, talent benchmarks, and existing regressions")
 

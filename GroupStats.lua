@@ -32,8 +32,10 @@ function S.GroupRoster(remember)
     return roster, units
 end
 
-local function scan() S.GroupRoster(true) end
-S.OnActive(scan)
+local function scan()
+    if S.Eligible(S.me and S.me.key) then S.GroupRoster(true) end
+end
+S.OnLevel60(scan)
 S.On("GROUP_ROSTER_UPDATE", scan)
 S.On("PLAYER_ENTERING_WORLD", scan)
 

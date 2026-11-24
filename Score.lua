@@ -4,6 +4,7 @@ local cache = {}
 
 function S.InvalidateScores()
     cache = {}
+    if S.QueuePlayerHistoryRefresh then S.QueuePlayerHistoryRefresh() end
     if S.ClearGroupStatsCache then S.ClearGroupStatsCache() end
     if S.ClearBuildStatsCache then S.ClearBuildStatsCache() end
     if S.QueueGroupFinderRefresh then S.QueueGroupFinderRefresh() end
@@ -29,7 +30,6 @@ end
 local function cohort(class, tree, role)
     local id = table.concat({class, tree or 0, role or ""}, ":")
     if cache[id] then return cache[id] end
-    if InCombatLockdown() then return end
     local data = {reviews = {}, combat = {}, count = 0}
     for _, size in ipairs(brackets) do data.combat[size] = {{}, {}} end
     for key, profile in pairs(S.db.profiles) do

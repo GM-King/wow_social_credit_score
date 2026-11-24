@@ -59,7 +59,10 @@ h1 em { display: block; color: var(--plum); }
 .button { display: inline-flex; gap: 1rem; padding: .7rem 1rem; background: var(--ink); color: #fff8e9; text-decoration: none; font-weight: 700; }
 .button:hover { background: var(--plum); }
 .button:focus-visible { outline-color: var(--ink); }
-.compat { color: var(--muted); font-size: .87rem; }
+.updated, .compat { color: var(--muted); font-size: .87rem; }
+.updated { margin-top: .35rem; }
+.actions { align-items: flex-start; }
+.actions > a { margin-top: .7rem; }
 .hero-art { width: 100%; height: auto; display: block; border: 1px solid var(--rule); }
 .install { background: #1c3735; color: #fbf2df; }
 .install-layout { display: grid; grid-template-columns: .8fr 1.2fr; gap: 1.5rem 3rem; padding-block: 3rem; }

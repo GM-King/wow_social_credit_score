@@ -105,12 +105,22 @@ local function activeConfig()
 end
 
 local function refreshOwner()
-    if not S.me or InCombatLockdown() then return end
+    if not S.Eligible(S.me and S.me.key) then return end
     local config = activeConfig()
     local staged = config and C_Traits and S.Call(C_Traits.ConfigHasStagedChanges, config)
     if staged == false or (config and C_Traits and not C_Traits.ConfigHasStagedChanges) then
-        ownTree, ownName = dominant(config)
-    elseif staged ~= true or ownConfig ~= config then
+        local tree, name = dominant(config)
+        if tree ~= nil then
+            ownTree, ownName = tree, name
+        elseif ownConfig == config then
+            return
+        else
+            ownTree, ownName = nil, nil
+        end
+    elseif not config then
+        -- A temporarily unreadable config does not invalidate the last confirmed build.
+        return
+    elseif ownConfig ~= config then
         ownTree, ownName = nil, nil
     end
     ownConfig = config
@@ -164,7 +174,7 @@ local function unitMap()
 end
 
 local function updateRoles()
-    if not S.me then return end
+    if not S.Eligible(S.me and S.me.key) then return end
     local roles = {}
     local function add(unit, key)
         local role = assignedRole(unit)
@@ -194,7 +204,7 @@ local function inspectBusy()
 end
 
 local function inspectNext()
-    if not S.me or not NotifyInspect or not CanInspect or InCombatLockdown() or inspectBusy() then return end
+    if not S.Eligible(S.me and S.me.key) or not NotifyInspect or not CanInspect or inspectBusy() then return end
     local now = GetTime()
     if pending and now < pending.untilTime then return end
     pending = nil
@@ -220,7 +230,7 @@ S.On("INSPECT_READY", function(guid)
     if not pending or not S.Readable(guid) or guid ~= pending.guid then return end
     local entry = pending
     pending = nil
-    if GetTime() >= entry.untilTime or InCombatLockdown() or inspectBusy() then return end
+    if GetTime() >= entry.untilTime or inspectBusy() then return end
     local unit = unitMap()[guid]
     local id = unit and S.Unit(unit)
     if not id or id.key ~= entry.key or S.Call(UnitGUID, unit) ~= guid then return end
@@ -240,11 +250,7 @@ end
 
 for _, event in ipairs({"ACTIVE_COMBAT_CONFIG_CHANGED", "TRAIT_CONFIG_UPDATED", "ACTIVE_TALENT_GROUP_CHANGED",
     "ACTIVE_PLAYER_SPECIALIZATION_CHANGED", "PLAYER_TALENT_UPDATE", "PLAYER_ENTERING_WORLD", "PLAYER_REGEN_ENABLED"}) do
-    S.On(event, function()
-        if not S.me then return end
-        if InCombatLockdown() then ownConfig, ownTree, ownName = nil, nil, nil
-        else refresh() end
-    end)
+    S.On(event, refresh)
 end
 S.On("GROUP_ROSTER_UPDATE", function()
     local units = unitMap()
@@ -256,7 +262,7 @@ end)
 S.On("PLAYER_ROLES_ASSIGNED", updateRoles)
 S.On("ROLE_CHANGED_INFORM", updateRoles)
 S.On("PARTY_ASSIGNMENT_UPDATE", updateRoles)
-S.OnActive(function()
+S.OnLevel60(function()
     if NotifyInspect and hooksecurefunc then
         hooksecurefunc("NotifyInspect", function() if not requested then pending = nil end end)
     end

@@ -16,7 +16,7 @@ function S.BlackMarkReviewers(key)
         if not S.db.profiles[key] or S.Eligible(key) then
             local _, guildmates = S.ReviewRelationships()
             for author, record in pairs(reviews) do
-                if record.level60 and record.stars == 0 and (S.db.alts[author] or guildmates[author]) then
+                if record.stars == 0 and (S.db.alts[author] or guildmates[author]) then
                     reviewers[#reviewers + 1] = author == S.me.key and "Your review"
                         or S.db.alts[author] and ("Your alt · " .. record.name) or record.name
                 end
@@ -41,7 +41,7 @@ local function updatePortrait(owner, anchor, unit)
     if not owner or not anchor then return end
     local overlay = overlays[anchor]
     if not overlay then
-        if InCombatLockdown() then return end
+        if InCombatLockdown() and S.Call(owner.IsProtected, owner) ~= false then return end
         overlay = CreateFrame("Frame", nil, UIParent)
         overlay:SetFrameStrata("HIGH")
         overlay:SetSize(18, 18)

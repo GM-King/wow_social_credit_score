@@ -1,8 +1,8 @@
 # Social Credit System
 
-[Download 2.8.0](https://github.com/GM-King/wow_social_credit_score/releases/download/v2.8.0/SocialCreditSystem-2.8.0.zip) · [Installation and player guide](https://gm-king.github.io/wow_social_credit_score/)
+[Download 2.9.0](https://gm-king.github.io/wow_social_credit_score/downloads/SocialCreditSystem-2.9.0.zip) · [Installation and player guide](https://gm-king.github.io/wow_social_credit_score/)
 
-Version 2 activates at level 60 and displays profiles of known same-faction level-60 characters. Level-60 reviews count toward the 0–1000 composite after five distinct authors. Previous reviews remain visible when the subject is verified. Authors can reaffirm them by saving an edit at level 60.
+Characters at any level can view and review known same-faction profiles. A character's 0-1000 Social Credit Score unlocks at level 60 after reviews from five distinct authors. Reviews received while leveling count automatically. Use the close button or Escape to close the profile in combat.
 
 The composite uses 75% review rating and 25% instance combat. Reviews compare same-faction characters of the same class. Combat benchmarks also match the active talent tree, tank or non-tank role, and instance size. Each metric maps the local population's minimum, mean and maximum to 0, 500 and 1000. SCS uses the better of the DPS and HPS results in each qualifying bracket and averages those brackets. A bracket needs three verified clears for the player and five qualifying characters for a benchmark. Scores with insufficient combat data use a provisional combat value of 500.
 
@@ -11,6 +11,8 @@ Version 2.7 starts tracking talent trees and roles for new combat samples. The p
 **Explicit Words** counts case-insensitive whole-word matches from the English list in `Stats.lua`, including the listed inflections. It covers the character's own readable local, group, guild and public chat, excluding whispers. The addon stores and syncs only the count and start date. The counter carries no score weight.
 
 For World of Warcraft Forever, interface 16001. The addon is installed when this folder sits directly under the client's `Interface/AddOns` folder.
+
+Click the black stamp on the minimap to open **Recent** and **Reviewed**. Recent keeps your character's last 100 distinct party, raid, and whisper contacts. Reviewed lists your active reviews. Click a row to open its profile, and use **Back to player history** to return to the same tab. Drag the stamp to move it.
 
 Right-click a same-faction player and select **Social Credit**, or target them and type `/scs`. To reopen a known profile, type `/scs First Surname`. Each review is named and can be edited by its original character. Select the left or right half of a star to rate from 0.5 to 5. Half-star reviews require addon version 2.5 or later to sync. Players can read individual reviews as they arrive. The average appears once five accepted reviews are present.
 
@@ -32,7 +34,7 @@ Version 1.3 starts a new series of instance combat averages. DPS and HPS use Bli
 
 **Need-to-Greed** shows the counts of Need and Greed selections on equippable group loot, including main-spec and off-spec Need. For example, **3:1** means three Need selections and one Greed selection. Pass, Transmog, and typed `/roll` commands are excluded. Choice counts start with version 2.4 and are shared by the character's addon.
 
-Reviews are backed up in game SavedVariables and by peers. The database is scoped to this installation's known account characters. It uses Forever's regionally unique two-part name as the stable key for addon messages. A character rename can appear as a new identity. Separate installs, unrecognized alts, modified clients, and colluding peers can bypass the local restrictions. Peer discovery and sync depend on available in-game channels and are paused in instances and combat.
+Reviews are backed up in game SavedVariables and by peers. The database is scoped to this installation's known account characters. It uses Forever's regionally unique two-part name as the stable key for addon messages. A character rename can appear as a new identity. Separate installs, unrecognized alts, modified clients, and colluding peers can bypass the local restrictions. Profiles, scores, player history, and local review editing work during combat and in instances. Peer discovery and sync use the channels the game allows. Saved reviews remain queued for peer replication when addon messaging is available again.
 
 Gear scoring uses the original GearScoreLite coefficient lineage, following [TacoTip's Forever implementation](https://github.com/ssdeanx/TacoTip-Gearscore-TBC/blob/main/gearscore.lua) by AcidBomb, based on the original TacoTip by kebabstorm and GearScoreLite by Mirrikat45 and contributors.
 
