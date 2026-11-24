@@ -23,7 +23,7 @@
       <div class="hero-copy">
         <p class="eyebrow">World of Warcraft Forever</p>
         <h1 id="title">Social Credit <em>System</em></h1>
-        <p class="intro">Read player reviews, compare dungeon and raid performance, and see Social Credit Scores in Group Finder.</p>
+        <p class="intro">Click the black stamp on your minimap, then choose a player to open their profile. You can also right-click a name in chat or the Who list and choose <strong>Open SCS</strong>, or target a player and type <code>/scs</code>.</p>
         <div class="actions">
           <div class="download">
             <a class="button" href="downloads/SocialCreditSystem-2.9.0.zip" download>Download 2.9.0 <span aria-hidden="true">↓</span></a>
@@ -31,7 +31,7 @@
           </div>
           <a href="#install">Installation</a>
         </div>
-        <p class="compat">Browse and review at any level. Scores unlock at level 60.</p>
+        <p class="compat">At any level, you can read and write reviews of other players in your faction. Reviews received while leveling count toward the player's score.</p>
       </div>
       <img class="hero-art" src="art/guild-archive.webp" alt="An orc archivist records a returning adventuring party in an open ledger" width="1440" height="960" fetchpriority="high">
     </section>
@@ -45,7 +45,7 @@
         <ol>
           <li>Download and extract <strong>SocialCreditSystem-2.9.0.zip</strong>.</li>
           <li>Move the extracted <strong>SocialCreditSystem</strong> folder into <code>_forever_/Interface/AddOns/</code>.</li>
-          <li>Enable Social Credit System in the AddOns list. In game, click the minimap stamp, type <code>/scs</code> with a player targeted, or right-click a name in chat or the Who list and choose <strong>Open SCS</strong>.</li>
+          <li>Enable <strong>Social Credit System</strong> in the AddOns list at character selection, then enter the game.</li>
         </ol>
       </div>
     </section>
@@ -53,7 +53,7 @@
     <section class="guide shell" id="guide" aria-labelledby="guide-title">
       <div class="guide-heading">
         <p class="eyebrow">Player guide</p>
-        <h2 id="guide-title">Inside a profile</h2>
+        <h2 id="guide-title">Find a player and leave a review</h2>
       </div>
       <div class="guide-layout">
         <article class="profile" aria-labelledby="example-name">
@@ -73,12 +73,16 @@
         </article>
         <div class="guide-notes">
           <article>
+            <h3>Find someone you've played with</h3>
+            <p>Click the minimap stamp. <strong>Recent</strong> lists your last 100 distinct party, raid, and whisper contacts. <strong>Reviewed</strong> lists players you currently have a review for. Click a name in either tab to open the profile.</p>
+          </article>
+          <article>
             <h3>Read and write reviews</h3>
-            <p>Rate an eligible player in half-star steps and add a short note. The original author can edit or delete their review. Other eligible players can read synced reviews. The reviewed player cannot open their own profile.</p>
+            <p>Open another player's profile to read individual reviews as they arrive. To leave your own, choose a rating in half-star steps, add a short note, and save. Return through <strong>Reviewed</strong> to edit or delete your review, including during combat or in an instance.</p>
           </article>
           <article>
             <h3>Understand the score</h3>
-            <p>At level 60, five reviews unlock the star average and a score out of 1000. Reviews received before level 60 count automatically. Reviews contribute 75%. Instance performance contributes 25% and uses the stronger DPS or HPS benchmark for the player’s class, talent tree, tank or non-tank role, and group size. Scores stay provisional while combat data is limited.</p>
+            <p>A player's score appears once they reach level 60 and have reviews from five distinct authors. Reviews received before 60 count automatically. On the 0–1000 scale, ratings contribute 75% and dungeon and raid performance contributes 25%. Group Finder shows available scores for players and group leaders. An asterisk marks a provisional score while combat data is limited.</p>
           </article>
           <article id="whats-new">
             <h3>New in 2.9.0</h3>
