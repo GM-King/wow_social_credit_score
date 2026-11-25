@@ -199,20 +199,20 @@ local function build()
     label(f, 132, 23, 355, "GameFontNormal", gold, "SOCIAL CREDIT SYSTEM")
     f.name = label(f, 132, 45, 410, "GameFontHighlightHuge", cream)
     f.name:SetMaxLines(1)
-    f.blacklist = CreateFrame("Frame", nil, f)
-    f.blacklist:SetPoint("LEFT", f.name, "LEFT", 0, 0)
-    f.blacklist:SetSize(135, 20)
-    f.blacklist:EnableMouseMotion(true)
-    label(f.blacklist, 0, 2, 135, "GameFontHighlightSmall", cream, S.BlackMarkIcon(16) .. " Blacklisted")
-    f.blacklist:SetScript("OnEnter", function(self)
+    f.blackMark = CreateFrame("Frame", nil, f)
+    f.blackMark:SetPoint("LEFT", f.name, "LEFT", 0, 0)
+    f.blackMark:SetSize(135, 20)
+    f.blackMark:EnableMouseMotion(true)
+    label(f.blackMark, 0, 2, 135, "GameFontHighlightSmall", cream, S.BlackMarkIcon(16) .. " Black Mark")
+    f.blackMark:SetScript("OnEnter", function(self)
         local reviewers = S.BlackMarkReviewers(S.openSubject)
         if not reviewers or not GameTooltip then return end
         GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:AddLine("Blacklisted")
+        GameTooltip:AddLine("Black Mark")
         for _, reviewer in ipairs(reviewers) do GameTooltip:AddLine(reviewer, 1, .94, .85) end
         GameTooltip:Show()
     end)
-    f.blacklist:SetScript("OnLeave", function(self)
+    f.blackMark:SetScript("OnLeave", function(self)
         if GameTooltip and GameTooltip:IsOwned(self) then GameTooltip:Hide() end
     end)
     f.guild = label(f, 132, 72, 420, "GameFontHighlightSmall", muted)
@@ -241,6 +241,8 @@ local function build()
     f.border = f:CreateTexture(nil, "OVERLAY")
     f.border:SetPoint("CENTER", f.portrait)
     f.border:SetSize(112, 112)
+    f.activeInstance = label(f, 584, 96, 184, "GameFontHighlightSmall", cream)
+    f.activeInstance:SetMaxLines(2)
     f.edit = button(f, 584, 63, 184, "Write review", showEditor)
     f.close = CreateFrame("Button", nil, f, "UIPanelCloseButton")
     f.close:SetPoint("TOPRIGHT", -3, -4)
@@ -347,7 +349,7 @@ local function build()
     art(editor, starsX, 41, 222, 36, "StatsSlate")
     editor.icons = S.CreateAverageStars(editor, starsX + 7, 45, 28, 45)
     editor.rating = label(editor, 397, 54, 77, "GameFontHighlight", gold)
-    editor.zero = button(editor, 20, 46, 130, "0 stars · Blacklist", function()
+    editor.zero = button(editor, 20, 46, 130, "0 stars · Black Mark", function()
         editor.stars = 0
         previewRating(editor, 0)
     end)
@@ -400,8 +402,8 @@ local function build()
     end
     if StaticPopupDialogs then
         StaticPopupDialogs[confirmation] = {
-            text = "Blacklist %s?\n\nThis zero-star review counts toward their score. You and your current guildmates will see a black mark on this player.",
-            button1 = "Blacklist player", button2 = "Cancel",
+            text = "Apply a Black Mark to %s?\n\nThis zero-star review counts toward their score. You and your current guildmates will see a black mark on this player.",
+            button1 = "Apply Black Mark", button2 = "Cancel",
             timeout = 0, whileDead = true, hideOnEscape = true,
             OnAccept = function(_, draft)
                 if not draft or S.openSubject ~= draft.subject or not shade:IsVisible() then return end
@@ -479,7 +481,9 @@ function S.PaintProfileBorder(texture, tier)
 end
 
 function S.Refresh(subject)
-    if not S.me or not frame or not subject or subject ~= S.openSubject or S.db.alts[subject] then return end
+    if not S.me or not frame or not subject or subject ~= S.openSubject then return end
+    local selfProfile = subject == S.me.key
+    if S.db.alts[subject] and not selfProfile then return end
     local verified = S.Viewable(subject)
     if not verified and not frame.preview then frame:Hide(); return end
     local rows = S.Reviews(subject, filter)
@@ -488,21 +492,21 @@ function S.Refresh(subject)
     if not eligible then count = S.ReviewAverage(subject) end
     local tier = S.Tier(score)
     local profile = S.db.profiles[subject] or {}
-    local blacklisted = verified and S.BlackMarkReviewers(subject) ~= nil
-    frame.name:SetWidth(blacklisted and 315 or 410)
-    frame.blacklist:ClearAllPoints()
-    frame.blacklist:SetPoint("LEFT", frame.name, "LEFT", math.min(frame.name:GetStringWidth(), 315) + 8, 0)
-    frame.blacklist:SetShown(blacklisted)
-    frame.blackPortrait:SetShown(blacklisted)
+    local marked = verified and S.BlackMarkReviewers(subject) ~= nil
+    frame.name:SetWidth(marked and 315 or 410)
+    frame.blackMark:ClearAllPoints()
+    frame.blackMark:SetPoint("LEFT", frame.name, "LEFT", math.min(frame.name:GetStringWidth(), 315) + 8, 0)
+    frame.blackMark:SetShown(marked)
+    frame.blackPortrait:SetShown(marked)
     frame.guild:SetText(profile.guild == "" and "Unguilded" or profile.guild or "")
-    frame.score:SetText(not verified and "Same-faction profile unverified"
+    frame.score:SetText(selfProfile and "Your character" or not verified and "Same-faction profile unverified"
         or not profile.level and "Level unknown"
         or not eligible and "SCS unlocks at level 60" or score and ("%.2f SCS  ·  %s%s"):format(score, tier, provisional and "  ·  Provisional" or "")
         or (average and "Class comparison unavailable"
             or "Social Credit Score —"))
     S.PaintAverageStars(frame.averageStars, average, 13)
     frame.reviewMean:SetPoint("TOPLEFT", average and 211 or 132, -111)
-    frame.reviewMean:SetText(eligible and S.AverageCaption(count, average)
+    frame.reviewMean:SetText(selfProfile and "" or eligible and S.AverageCaption(count, average)
         or ("%d %s"):format(count, count == 1 and "review" or "reviews"))
     frame.scoreDetail = score and ("%s comparison · %d known characters\n%d qualifying review averages · %d combat brackets\nReviews %.2f × 75%% · Combat %.2f × 25%%%s")
         :format(profile.class, population, reviewers, brackets, review, combat,
@@ -510,7 +514,8 @@ function S.Refresh(subject)
     S.PaintProfileBorder(frame.border, tier)
     local owner = S.db.authored[subject]
     local owns = not owner or owner == S.me.key
-    frame.edit:SetEnabled(verified and owns)
+    frame.edit:SetShown(not selfProfile)
+    frame.edit:SetEnabled(not selfProfile and verified and owns)
     local ownRecord = (S.db.reviews[subject] or {})[S.me.key]
     local editing = ownRecord and not ownRecord.deleted
     frame.edit.caption:SetText(not verified and "Review unavailable" or owner and (owns and (editing and "Edit review" or "Write review")
@@ -527,7 +532,7 @@ function S.Refresh(subject)
     frame.page:SetText(page .. " / " .. pages)
     frame.previous:SetEnabled(page > 1)
     frame.next:SetEnabled(page < pages)
-    frame.empty:SetText(#rows == 0 and ("No " .. (filter == "Newest" and "" or filter:lower() .. " ") .. "reviews") or "")
+    frame.empty:SetText(selfProfile and "Personal combat and character stats" or #rows == 0 and ("No " .. (filter == "Newest" and "" or filter:lower() .. " ") .. "reviews") or "")
     local friends, guildmates = S.ReviewRelationships()
     for i, slot in ipairs(frame.rows) do
         local row = rows[(page - 1) * perPage + i]
@@ -554,6 +559,11 @@ function S.Refresh(subject)
             S.PaintAverageStars(slot.icons, row.stars, 16)
         end
     end
+    local instanceName, instanceRates
+    if subject == S.me.key then instanceName, instanceRates = S.ActiveInstance() end
+    frame.activeInstance:SetText(instanceName and (instanceName .. "\n" ..
+        (instanceRates and (instanceRates[3] + instanceRates[6] > 0) and combatRate(instanceRates)
+            or "Waiting for meter data")) or "")
     local rates, stats, shared, ratesHeading, lifetime = statsText(subject)
     frame.lifetimeRates = lifetime
     frame.ratesHeading:SetText(ratesHeading)
@@ -569,7 +579,9 @@ local function open(key, unit, returnTo, preview)
         print("Social Credit System: available for known same-faction characters.")
         return
     end
-    if S.db.alts[key] then print("Social Credit System: your own profiles are private."); return end
+    local selfProfile = key == S.me.key
+    if S.db.alts[key] and not selfProfile then print("Social Credit System: your own profiles are private."); return end
+    if selfProfile then unit = "player" end
     if not frame then frame = build() end
     pendingProfile = nil
     dismissConfirmation()
@@ -585,7 +597,7 @@ local function open(key, unit, returnTo, preview)
     S.PaintProfilePortrait(frame.portrait, id and id.key == key and unit, profile and profile.class)
     frame:Show()
     S.Refresh(key)
-    if not preview then
+    if not preview and not selfProfile then
         S.RequestReviewGuildRoster()
         S.Query(key)
     end
@@ -702,7 +714,9 @@ end)
 SLASH_SOCIALCREDITSYSTEM1 = "/scs"
 SlashCmdList.SOCIALCREDITSYSTEM = function(input)
     pendingProfile = nil
-    if input:match("^%s*$") then
+    if S.me and input:lower():match("^%s*self%s*$") then
+        open(S.me.key, "player")
+    elseif input:match("^%s*$") then
         local id = inspect("target")
         open(id and id.key, "target")
     else S.OpenNamedProfile(input) end

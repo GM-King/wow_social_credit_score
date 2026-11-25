@@ -360,6 +360,15 @@ function S.Query(subject)
     end
 end
 
+local function answerInstanceFights(peer, subject, cursor)
+    local ids, rows = S.InstanceFightReports(subject, cursor)
+    for i = 1, math.min(#ids, 6) do
+        local id = ids[i]
+        if not whisper(peer, "N~" .. subject .. "~" .. S.ExportInstanceFight(id, rows[id])) then return end
+    end
+    if #ids > 6 then whisper(peer, "Y~" .. subject .. "~f:" .. ids[6]) end
+end
+
 local function answerGroup(peer, subject, cursor)
     if peer == subject or S.db.alts[subject] then return end
     local profile, ids, rows = S.GroupReports(subject, cursor)
@@ -507,26 +516,33 @@ local function receive(body, route, key, address)
         if class and #class <= 24 then review("R", record, key) end
         return
     end
-    if kind == "X" or kind == "M" or kind == "T" or kind == "V" or kind == "U" or kind == "D" then
+    if kind == "X" or kind == "M" or kind == "T" or kind == "V" or kind == "U" or kind == "D" or kind == "N" or kind == "Y" then
         local subject, value = data:match("^([^~]+)~(.*)$")
         if not subject or S.Identity(subject) ~= subject
             or (S.db.alts[subject] and (kind ~= "X" or subject ~= S.me.key)) then return end
-        if subject == key and kind ~= "U" and kind ~= "V" then return end
+        if subject == key and kind ~= "U" and kind ~= "V" and kind ~= "N" and kind ~= "Y" then return end
         local requestKey = key .. "~" .. subject
         local cursor = #value <= 64 and value:match("^%d+:%d+:[%d:]+$")
-        if kind == "X" and (value == "" or cursor) then
+        local fightCursor = #value <= 34 and value:match("^f:(%d+:%d+)$")
+        if kind == "X" and (value == "" or cursor or fightCursor) then
             local servedKey = "X~" .. requestKey .. "~" .. value
             if (served[servedKey] or 0) > GetTime() then return end
             served[servedKey] = GetTime() + 10
             if not S.Eligible(S.me.key) then return end
-            if subject == S.me.key then answerOwnerCombat(key, subject, value)
-            else answerGroup(key, subject, value) end
+            if fightCursor then
+                answerInstanceFights(key, subject, fightCursor)
+            else
+                if subject == S.me.key then answerOwnerCombat(key, subject, value)
+                else answerGroup(key, subject, value) end
+                if value == "" then answerInstanceFights(key, subject, "") end
+            end
         elseif (groupRequests[requestKey] or -1) >= GetTime() then
             if kind == "M" then S.ImportGroupProfile(subject, value)
             elseif kind == "T" then S.ImportGroupClear(subject, key, value)
             elseif kind == "D" then S.ImportTalentContext(subject, value, false)
             elseif kind == "U" then S.ImportBuildClear(subject, key, value)
-            elseif kind == "V" and cursor then requestGroup(key, subject, value) end
+            elseif kind == "N" then S.ImportInstanceFight(subject, key, value)
+            elseif (kind == "V" and cursor) or (kind == "Y" and fightCursor) then requestGroup(key, subject, value) end
         end
         return
     end

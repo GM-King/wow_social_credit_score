@@ -1,6 +1,7 @@
 local _, S = ...
 local stats, run, fight
 local observed, pending, meterContext, baselineReady = {}, {}, nil, false
+local closing, instanceRetry
 local meter = C_DamageMeter
 local sizes = {5, 10, 20, 40}
 local slots = {1, 2, 3, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18}
@@ -101,39 +102,72 @@ local function professions()
 end
 
 local function instance()
-    local _, kind, difficulty, capacity, _, _, _, map = S.Call(GetInstanceInfo)
-    local key = map and table.concat({kind or "none", map, difficulty or 0}, ":")
-    return key, kind, capacity, map
+    local name, kind, difficulty, _, capacity, _, _, map, groupSize = S.Call(GetInstanceInfo)
+    if kind ~= "party" and kind ~= "raid" and kind ~= "pvp" then
+        if kind and not S.Call(IsInInstance) then return nil, kind end
+        return
+    end
+    if type(map) ~= "number" or map <= 0 or type(difficulty) ~= "number" then return end
+    if not capacity or capacity <= 0 then capacity = groupSize end
+    if not capacity or capacity <= 0 then return end
+    return ("%s:%d:%d"):format(kind, map, difficulty), kind, capacity, map, name
 end
 
 local function raidLock()
     if not GetNumSavedInstances or not GetSavedInstanceInfo then return end
-    local name, _, difficulty = S.Call(GetInstanceInfo)
+    local name, _, difficulty, _, _, _, _, map = S.Call(GetInstanceInfo)
     for i = 1, S.Call(GetNumSavedInstances) or 0 do
-        local saved, id, _, mode, locked, extended, high, raid, _, _, bosses, killed = GetSavedInstanceInfo(i)
-        if S.Readable(saved) and S.Readable(id) and S.Readable(mode) and S.Readable(locked)
+        local ok, saved, id, _, mode, locked, extended, high, raid, _, _, bosses, killed, _, savedMap =
+            pcall(GetSavedInstanceInfo, i)
+        if ok and S.Readable(saved) and S.Readable(id) and S.Readable(mode) and S.Readable(locked)
             and S.Readable(extended) and S.Readable(high) and S.Readable(raid)
-            and saved == name and mode == difficulty and raid and (locked or extended) and id then
+            and saved == name and mode == difficulty and raid and (locked or extended) and type(id) == "number"
+            and id > 0 and S.Readable(savedMap) and (not savedMap or savedMap == 0 or savedMap == map) then
             return tostring(high or 0) .. ":" .. tostring(id),
                 S.Readable(bosses) and S.Readable(killed) and type(bosses) == "number" and bosses > 0 and bosses == killed
         end
     end
 end
 
+local function mergeRateRows(target, source)
+    if not source then return target end
+    target = target or {}
+    for key, values in pairs(source) do
+        local total = target[key] or {0, 0, 0, 0, 0, 0}
+        for i = 1, 6 do total[i] = total[i] + values[i] end
+        target[key] = total
+    end
+    return target
+end
+
 local function updateInstance()
     if not stats then return end
-    local key, kind, capacity, map = instance()
-    local active = kind == "party" or kind == "raid" or kind == "pvp"
-    if not active or not map then stats.run, run, fight = nil, nil, nil; return end
+    local key, kind, capacity, map, name = instance()
+    if not key then
+        if kind then stats.run, run, fight = nil, nil, nil end
+        return kind ~= nil
+    end
     if not stats.run or stats.run.key ~= key then stats.run = {key = key} end
     run = stats.run
-    run.kind, run.capacity, run.map = kind, capacity, map
+    run.kind, run.capacity, run.map, run.name = kind, capacity, map, name
     run.rates = run.rates or {}
     if kind == "raid" then
         local lock = raidLock()
         if lock then
             local saved = stats.raidRuns[lock]
             if saved and (not run.lock or run.lock ~= lock) then
+                saved.activeRates = mergeRateRows(saved.activeRates, run.activeRates)
+                saved.ownerBuildRates = mergeRateRows(saved.ownerBuildRates, run.ownerBuildRates)
+                for subject, builds in pairs(run.groupBuildRates or {}) do
+                    saved.groupBuildRates = saved.groupBuildRates or {}
+                    saved.groupBuildRates[subject] = mergeRateRows(saved.groupBuildRates[subject], builds)
+                end
+                if fight and fight.run == run then fight.run = saved end
+                if closing and closing.run == run then closing.run = saved end
+                for _, sample in pairs(pending) do
+                    if sample.run == run then sample.run = saved end
+                end
+                if meterContext == run then meterContext = saved end
                 run = saved
                 stats.run = run
             else
@@ -142,6 +176,7 @@ local function updateInstance()
             end
         end
     end
+    return true
 end
 
 local function addRate(row, offset, weighted, seconds, samples)
@@ -172,10 +207,10 @@ local function complete(kind, participants, stamp)
     end
     if (kind == "party" and size == 5) or (kind == "raid" and (size == 10 or size == 20 or size == 40)) then
         stats.runs[size] = (stats.runs[size] or 0) + 1
-        run.scored = true
-        local accumulated = rateRow(stats.rates, size)
-        local collected = rateRow(run.rates, size)
-        for i = 1, 6 do accumulated[i] = accumulated[i] + collected[i] end
+        if run.rates[size] then
+            local accumulated = rateRow(stats.rates, size)
+            for i = 1, 6 do accumulated[i] = accumulated[i] + run.rates[size][i] end
+        end
         S.InvalidateScores()
     end
 end
@@ -195,7 +230,7 @@ local function discover(sample)
     local available = sessions()
     if type(available) ~= "table" then return false end
     for _, entry in ipairs(available) do
-        if S.Readable(entry) and S.Readable(entry.sessionID) and type(entry.sessionID) == "number"
+        if S.Readable(entry) and type(entry) == "table" and S.Readable(entry.sessionID) and type(entry.sessionID) == "number"
             and entry.sessionID > 0 and not observed[entry.sessionID] then
             observed[entry.sessionID] = true
             if sample then sample.ids[entry.sessionID] = true end
@@ -205,22 +240,22 @@ local function discover(sample)
 end
 
 local function resetMeter()
-    fight, pending = nil, {}
-    meterContext = instance()
+    fight, closing = nil, nil
+    meterContext = run
     baselineReady = discover()
 end
 
 local function readMeter(id, kind, visit)
     local session = S.Call(meter.GetCombatSessionFromID, id, kind)
-    if type(session) ~= "table" or not S.Readable(session.durationSeconds)
+    if not S.Readable(session) or type(session) ~= "table" or not S.Readable(session.durationSeconds)
         or not S.Readable(session.combatSources) then return end
     local seconds = session.durationSeconds
     if type(seconds) ~= "number" or seconds <= 0 or seconds >= math.huge
-        or type(session.combatSources) ~= "table" then return end
+        or seconds > 86400 or type(session.combatSources) ~= "table" then return end
     for _, source in ipairs(session.combatSources) do
         if S.Readable(source) then
             local rate = source.amountPerSecond
-            if S.Readable(rate) and type(rate) == "number" and rate >= 0 and rate < math.huge then
+            if S.Readable(rate) and type(rate) == "number" and rate >= 0 and rate <= 1e8 then
                 visit(source, rate, seconds)
             end
         end
@@ -243,23 +278,23 @@ local function addBuildRate(runState, subject, build, offset, rate, seconds)
 end
 
 local function finalize()
-    if not stats or instance() ~= meterContext then return end
+    if not stats or S.Call(InCombatLockdown) then return end
     local types = Enum and Enum.DamageMeterType
     if not types then return end
     for id, sample in pairs(pending) do
         if GetTime() <= sample.expires then
-            local row = rateRow(sample.run.rates, sample.bucket)
+            sample.run.activeRates = sample.run.activeRates or {}
+            local row = rateRow(sample.run.activeRates, sample.bucket)
             local function include(kind, offset)
                 readMeter(id, kind, function(source, rate, seconds)
                     if seconds > sample.duration + 1 then return end
                     local seen = sample.done[offset]
                     if S.Readable(source.isLocalPlayer) and source.isLocalPlayer and not seen.self then
                         addRate(row, offset, rate * seconds, seconds, 1)
-                        addBuildRate(sample.run, S.me.key, sample.builds[S.me.key], offset, rate, seconds)
-                        if sample.run.scored then
-                            addRate(rateRow(stats.rates, sample.bucket), offset, rate * seconds, seconds, 1)
-                            S.InvalidateScores()
+                        if sample.scoreEligible then
+                            addBuildRate(sample.run, S.me.key, sample.builds[S.me.key], offset, rate, seconds)
                         end
+                        S.RecordInstanceFight(S.me.key, sample, offset, rate, seconds)
                         seen.self = true
                     end
                     local guid = source.sourceGUID
@@ -267,13 +302,10 @@ local function finalize()
                     local subject = sample.roster[guid]
                     if not subject or seen[subject] then return end
                     seen[subject] = true
-                    local collected = sample.run.groupRates or {}
-                    sample.run.groupRates = collected
-                    collected[subject] = collected[subject] or {0, 0, 0, 0, 0, 0}
-                    addRate(collected[subject], offset, rate * seconds, seconds, 1)
-                    addBuildRate(sample.run, subject, sample.builds[subject], offset, rate, seconds)
-                    if sample.run.groupClear then
-                        S.UpdateGroupClear(sample.run, subject)
+                    S.RecordInstanceFight(subject, sample, offset, rate, seconds)
+                    if sample.scoreEligible then
+                        addBuildRate(sample.run, subject, sample.builds[subject], offset, rate, seconds)
+                        if sample.run.groupClear then S.UpdateGroupClear(sample.run, subject) end
                     end
                 end)
             end
@@ -284,19 +316,53 @@ local function finalize()
     end
 end
 
-S.On("PLAYER_REGEN_DISABLED", function()
+local function refreshRun()
+    if S.Refresh and S.openSubject == S.me.key then S.Refresh(S.me.key) end
+end
+
+local function refreshInstance(retries)
     if not stats then return end
-    local bucket = combatBucket()
-    if not bucket or not run or run.completed or instance() ~= meterContext or not baselineReady then
-        baselineReady = discover()
+    if not updateInstance() then
+        if not instanceRetry and retries > 0 then
+            instanceRetry = C_Timer.After(.25, function()
+                instanceRetry = nil
+                refreshInstance(retries - 1)
+            end) or true
+        end
         return
     end
-    -- IDs first exposed at pull start can only be attributed through meter updates
-    -- or the synchronous encounter boundary. Older visible sessions were baselined.
-    local roster, units = S.GroupRoster(false)
+    if run ~= meterContext then resetMeter() end
+    refreshRun()
+end
+
+function S.ActiveInstance()
+    if not run or (run.kind ~= "party" and run.kind ~= "raid") or instance() ~= run.key then return end
+    return run.name, run.activeRates and run.activeRates[run.capacity]
+end
+
+local function queueSample(sample, id)
+    if sample.queued[id] then return end
+    sample.queued[id] = true
+    pending[id] = {id = ("%d:%d"):format(sample.sequence, id), bucket = sample.bucket, map = sample.map,
+        run = sample.run, duration = sample.duration, stamp = sample.stamp, expires = sample.expires,
+        roster = sample.roster, builds = sample.builds, scoreEligible = sample.scoreEligible, done = {[1] = {}, [4] = {}}}
+end
+
+S.On("PLAYER_REGEN_DISABLED", function()
+    if not stats then return end
+    closing = nil
+    refreshInstance(4)
+    local bucket = combatBucket()
+    if not bucket or instance() ~= run.key then return end
+    if not baselineReady then baselineReady = discover() end
+    if not baselineReady then return end
+    local roster, units = S.GroupRoster(true)
     local builds = {[S.me.key] = S.CaptureBuild("player", S.me.key)}
     for guid, key in pairs(roster) do builds[key] = S.CaptureBuild(units[guid], key) end
-    fight = {bucket = bucket, run = run, started = GetTime(), ids = {}, roster = roster, builds = builds}
+    stats.fightSequence = (stats.fightSequence or 0) + 1
+    fight = {bucket = bucket, map = run.key:match("^[^:]+:(.+)$"), run = run, started = GetTime(),
+        sequence = stats.fightSequence, ids = {}, roster = roster, builds = builds,
+        scoreEligible = not run.completed}
 end)
 
 S.On("GROUP_ROSTER_UPDATE", function()
@@ -309,46 +375,52 @@ end)
 
 S.On("DAMAGE_METER_COMBAT_SESSION_UPDATED", function(_, id)
     if not stats or not S.Readable(id) or type(id) ~= "number" or id <= 0 then return end
-    local sameContext = instance() == meterContext
-    if fight and sameContext and not observed[id] then fight.ids[id] = true end
+    if not observed[id] and run and instance() == run.key then
+        if fight then fight.ids[id] = true
+        elseif closing and GetTime() <= closing.discoverUntil then queueSample(closing, id) end
+    end
     observed[id] = true
-    if pending[id] and sameContext then C_Timer.After(.1, finalize) end
+    if pending[id] then C_Timer.After(.1, finalize) end
 end)
 
 S.On("PLAYER_REGEN_ENABLED", function()
     if not stats then return end
     local sample = fight
     fight = nil
-    if sample and instance() == meterContext then
+    if sample and run and instance() == run.key then
         discover(sample)
         local now = GetTime()
         local present = S.GroupRoster(true)
         for guid, key in pairs(sample.roster) do
             if present[guid] ~= key then sample.roster[guid] = nil end
         end
-        for id in pairs(sample.ids) do
-            pending[id] = {bucket = sample.bucket, run = sample.run, duration = now - sample.started,
-                expires = now + 120, roster = sample.roster, builds = sample.builds, done = {[1] = {}, [4] = {}}}
+        sample.stamp, sample.duration, sample.expires = S.Now(), now - sample.started, now + 120
+        sample.queued, sample.discoverUntil = {}, now + 3
+        closing = sample
+        for id in pairs(sample.ids) do queueSample(sample, id) end
+        for _, delay in ipairs({.25, 1, 3, 10, 30, 120}) do
+            C_Timer.After(delay, function()
+                if closing == sample and run and instance() == run.key and GetTime() <= sample.discoverUntil then
+                    discover(sample)
+                    for id in pairs(sample.ids) do queueSample(sample, id) end
+                end
+                finalize()
+            end)
         end
     else
         discover()
+        finalize()
     end
-    if next(pending) then C_Timer.After(.25, finalize) end
-    if stats then queueGear() end
+    queueGear()
 end)
-S.On("PLAYER_ENTERING_WORLD", function()
-    if not stats then return end
-    updateInstance()
-    resetMeter()
-end)
-S.On("ZONE_CHANGED_NEW_AREA", function()
-    if not stats then return end
-    updateInstance()
-    if instance() ~= meterContext then resetMeter() end
-end)
+
+for _, event in ipairs({"PLAYER_ENTERING_WORLD", "ZONE_CHANGED_NEW_AREA"}) do
+    S.On(event, function() refreshInstance(12) end)
+end
+
 S.On("DAMAGE_METER_RESET", function()
     if not stats then return end
-    observed = {}
+    observed, pending = {}, {}
     resetMeter()
 end)
 
@@ -411,7 +483,10 @@ S.On("LOOT_HISTORY_UPDATE_ENCOUNTER", function(encounter)
     end
 end)
 
-S.On("LFG_COMPLETION_REWARD", function() complete("party") end)
+S.On("LFG_COMPLETION_REWARD", function()
+    refreshInstance(4)
+    complete("party")
+end)
 S.On("PVP_MATCH_COMPLETE", function() complete("pvp") end)
 local raidCompletion
 local function verifyRaid()
@@ -426,6 +501,7 @@ local function verifyRaid()
 end
 S.On("UPDATE_INSTANCE_INFO", verifyRaid)
 S.On("ENCOUNTER_END", function(encounterID, _, _, _, successful)
+    refreshInstance(4)
     if not run or not S.Readable(successful) or successful ~= 1
         or not S.Readable(encounterID) then return end
     if run.kind == "raid" then
@@ -436,15 +512,20 @@ S.On("ENCOUNTER_END", function(encounterID, _, _, _, successful)
         return
     end
     if run.kind ~= "party" then return end
-    local uiMap = C_Map and S.Call(C_Map.GetBestMapForUnit, "player")
-    local journal = uiMap and S.Call(EJ_GetInstanceForMap, uiMap)
-    if not journal or journal == 0 then return end
+    local journal = S.Call(C_EncounterJournal and C_EncounterJournal.GetInstanceForGameMap, run.map)
+    if type(journal) ~= "number" or journal <= 0 then return end
+    local previous
+    if not S.Call(EJ_GetEncounterInfoByIndex, 1, journal) then
+        previous = S.Call(EJ_GetCurrentInstance)
+        S.Call(EJ_SelectInstance, journal)
+    end
     local lastGameEncounter
     for index = 1, 40 do
         local name, _, _, _, _, _, gameEncounter = S.Call(EJ_GetEncounterInfoByIndex, index, journal)
         if not name then break end
         lastGameEncounter = gameEncounter
     end
+    if previous and previous > 0 and previous ~= journal then S.Call(EJ_SelectInstance, previous) end
     if lastGameEncounter and lastGameEncounter == encounterID then complete("party") end
 end)
 S.On("PLAYER_EQUIPMENT_CHANGED", queueGear)
@@ -478,10 +559,11 @@ S.OnLevel60(function()
         stats.gearRolls = nil
         stats.dungeons, stats.battlegrounds, stats.gear = nil, nil, nil
     end
+    stats.rates, stats.runs = stats.rates or {}, stats.runs or {}
+    stats.raidRuns, stats.completedLocks = stats.raidRuns or {}, stats.completedLocks or {}
     stats.explicitWords = stats.explicitWords or 0
     stats.gearRolls = stats.gearRolls or {sum = 0, count = 0, seen = {}}
-    updateInstance()
-    resetMeter()
+    refreshInstance(12)
     C_Timer.After(2, function()
         queueGear()
         professions()

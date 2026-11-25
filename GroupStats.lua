@@ -58,6 +58,10 @@ S.OnActive(function()
     end
     for key in pairs(S.db.alts) do
         S.db.groupSeen[key], S.db.groupClears[key] = nil, nil
+        if key ~= S.me.key then
+            local reports = S.db.instanceFights[key]
+            S.db.instanceFights[key] = reports and reports[key] and {[key] = reports[key]} or nil
+        end
     end
 end)
 
@@ -157,11 +161,105 @@ local function aggregate(subject, owner)
     return stats
 end
 
+local function fightRows(subject, witness)
+    local subjects = S.db.instanceFights
+    subjects[subject] = subjects[subject] or {}
+    local witnesses = subjects[subject]
+    witnesses[witness] = witnesses[witness] or {}
+    return witnesses[witness]
+end
+
+local function fightChanged(subject)
+    cache[subject] = nil
+    if S.Refresh and S.openSubject == subject then S.Refresh(subject) end
+end
+
+function S.RecordInstanceFight(subject, sample, offset, rate, seconds)
+    local rows = fightRows(subject, S.me.key)
+    local row = rows[sample.id]
+    if not row then
+        row = {map = sample.map, size = sample.bucket, stamp = sample.stamp, rates = blank()}
+        rows[sample.id] = row
+    end
+    row.rates[offset], row.rates[offset + 1], row.rates[offset + 2] = rate * seconds, seconds, 1
+    fightChanged(subject)
+end
+
+local function mergeFights(subject, base, witnesses)
+    local stats = {}
+    for key, value in pairs(base or {}) do stats[key] = value end
+    stats.rates = S.Copy(stats.rates or {})
+    for _, offset in ipairs({1, 4}) do
+        local intervals = {}
+        for witness, reports in pairs(witnesses) do
+            for id, row in pairs(reports) do
+                local seconds = row.rates[offset + 1]
+                if seconds > 0 then
+                    intervals[#intervals + 1] = {row = row, witness = witness, id = id,
+                        starts = row.stamp - seconds, seconds = seconds}
+                end
+            end
+        end
+        table.sort(intervals, function(a, b)
+            if a.starts ~= b.starts then return a.starts < b.starts end
+            if a.witness ~= b.witness then return a.witness < b.witness end
+            return a.id < b.id
+        end)
+        local overlaps, selected = {}, {}
+        for _, item in ipairs(intervals) do
+            local row = item.row
+            local key = row.map .. ":" .. row.size
+            local cluster = overlaps[key]
+            if not cluster or item.starts >= cluster.ends then
+                cluster = {ends = row.stamp, best = item}
+                overlaps[key], selected[#selected + 1] = cluster, cluster
+            else
+                cluster.ends = math.max(cluster.ends, row.stamp)
+                local best = cluster.best
+                if (item.witness == subject and best.witness ~= subject)
+                    or ((item.witness == subject) == (best.witness == subject) and item.seconds > best.seconds) then
+                    cluster.best = item
+                end
+            end
+        end
+        for _, cluster in ipairs(selected) do
+            local row = cluster.best.row
+            stats.rates[row.size] = stats.rates[row.size] or blank()
+            local total = stats.rates[row.size]
+            for i = offset, offset + 2 do total[i] = total[i] + row.rates[i] end
+        end
+    end
+    return stats
+end
+
 function S.ProfileStats(subject)
     local owner = S.db.stats[subject]
-    if S.db.alts[subject] or not S.db.groupClears[subject] then return owner end
-    if not cache[subject] then cache[subject] = aggregate(subject, owner) or false end
+    local own = S.db.alts[subject]
+    local witnesses = S.db.instanceFights[subject]
+    if not witnesses and (own or not S.db.groupClears[subject]) then return owner end
+    if not cache[subject] then
+        local base = own and owner or aggregate(subject, owner)
+        if witnesses then
+            if own then witnesses = {[subject] = witnesses[subject]} end
+            base = mergeFights(subject, base, witnesses)
+        end
+        cache[subject] = base or false
+    end
     return cache[subject] or nil
+end
+
+function S.InstanceFightReports(subject, cursor)
+    local rows = (S.db.instanceFights[subject] or {})[S.me.key] or {}
+    local ids = {}
+    for id in pairs(rows) do if id > cursor then ids[#ids + 1] = id end end
+    table.sort(ids)
+    return ids, rows
+end
+
+function S.ExportInstanceFight(id, row)
+    local rates = row.rates
+    return ("1~%s~%s~%d~%d~%.3f~%.3f~%.3f~%.3f"):format(id, row.map, row.size, row.stamp,
+        rates[1], rates[2], rates[4], rates[5])
 end
 
 function S.GroupReports(subject, cursor)
@@ -218,4 +316,38 @@ function S.ImportGroupClear(subject, witness, payload)
             or weighted > seconds * 1e8 then return end
     end
     return store(subject, witness, map .. ":" .. token, row)
+end
+
+function S.ImportInstanceFight(subject, witness, payload)
+    if not S.Eligible(subject) or S.db.alts[subject] then return end
+    local f = fields(payload)
+    if #f ~= 9 or f[1] ~= "1" or #f[2] > 32 or not f[2]:match("^%d+:%d+$")
+        or #f[3] > 24 or not f[3]:match("^%d+:%d+$") then return end
+    local size, stamp = tonumber(f[4]), tonumber(f[5])
+    if not brackets[size] or not stamp or stamp % 1 ~= 0 or stamp < 1 or stamp > S.Now() + 60 then return end
+    local rates = blank()
+    for i, offset in ipairs({1, 4}) do
+        local weighted, seconds = tonumber(f[4 + i * 2]), tonumber(f[5 + i * 2])
+        if not weighted or not seconds or weighted ~= weighted or seconds ~= seconds
+            or seconds < 0 or seconds > 86400 or weighted < 0 or weighted > seconds * 1e8 then return end
+        rates[offset], rates[offset + 1], rates[offset + 2] = weighted, seconds, seconds > 0 and 1 or 0
+    end
+    if rates[3] + rates[6] == 0 then return end
+    local rows = fightRows(subject, witness)
+    local old = rows[f[2]]
+    if old then
+        if old.map ~= f[3] or old.size ~= size or old.stamp ~= stamp then return end
+        local updated
+        for _, offset in ipairs({1, 4}) do
+            if old.rates[offset + 2] > 0 then
+                for i = offset, offset + 2 do rates[i] = old.rates[i] end
+            elseif rates[offset + 2] > 0 then
+                updated = true
+            end
+        end
+        if not updated then return end
+    end
+    rows[f[2]] = {map = f[3], size = size, stamp = stamp, rates = rates}
+    fightChanged(subject)
+    return true
 end

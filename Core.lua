@@ -236,7 +236,7 @@ function S.DeleteReview(subject, revision)
 end
 
 local fields = {"alts", "names", "authored", "reviews", "stats", "synced", "deliveries", "profiles",
-    "recentPlayers", "historyMinimap", "groupSeen", "groupClears", "zeroSubjects", "talentContexts", "buildClears", "reviewRetractions"}
+    "recentPlayers", "historyMinimap", "groupSeen", "groupClears", "zeroSubjects", "talentContexts", "buildClears", "reviewRetractions", "instanceFights"}
 
 local function activate(level)
     level = level or S.Call(UnitLevel, "player")

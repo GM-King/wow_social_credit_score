@@ -1,6 +1,6 @@
 # Social Credit System
 
-[Download 2.9.0](https://gm-king.github.io/wow_social_credit_score/downloads/SocialCreditSystem-2.9.0.zip) · [Installation and player guide](https://gm-king.github.io/wow_social_credit_score/)
+[Download 2.10.0](https://gm-king.github.io/wow_social_credit_score/downloads/SocialCreditSystem-2.10.0.zip) · [Installation and player guide](https://gm-king.github.io/wow_social_credit_score/)
 
 Characters at any level can view and review known same-faction profiles. A character's 0-1000 Social Credit Score unlocks at level 60 after reviews from five distinct authors. Reviews received while leveling count automatically. Use the close button or Escape to close the profile in combat.
 
@@ -16,19 +16,17 @@ Click the black stamp on the minimap to open **Recent** and **Reviewed**. Recent
 
 Right-click a same-faction player and select **Social Credit**, or target them and type `/scs`. To reopen a known profile, type `/scs First Surname`. Each review is named and can be edited by its original character. Select the left or right half of a star to rate from 0.5 to 5. Half-star reviews require addon version 2.5 or later to sync. Players can read individual reviews as they arrive. The average appears once five accepted reviews are present.
 
-In version 2.6, right-click a character’s name in chat and select **Open SCS**. Selecting **0 stars · Blacklist** asks for confirmation when you first give a player zero stars or lower an existing rating to zero. Zero-star reviews count toward the review average and SCS. You and your current guildmates see the black mark on the profile, player portraits, new chat messages, and Group Finder. Raising your rating clears your mark as the amendment syncs. Another qualifying zero can keep the player marked.
+Right-click a character’s name in chat and select **Open SCS**. Selecting **0 stars · Black Mark** asks for confirmation when you first give a player zero stars or lower an existing rating to zero. Zero-star reviews count toward the review average and SCS. You and your current guildmates see the black mark on the profile, player portraits, new chat messages, and Group Finder. Raising your rating clears your mark as the amendment syncs. Another qualifying zero can keep the player marked.
 
 In version 2.8, the original author can choose **Delete review** from the review editor and write a fresh review later from the same character. Deletion removes the review from scores and clears its mark as it syncs. Peers on older versions may show the previous review until they upgrade and sync. Chat badges support Blizzard chat and Prat 3.0.
 
 **Group Finder → Browse** shows locally available Social Credit Scores for eligible players and labels group listings with their leader's score. Hover over a listing for its review averages and counts, including named group members when available. An asterisk flags a provisional score. A dash indicates that a score is unavailable.
 
-Level-60 addon users can build profiles for same-faction level-60 party and raid members without the addon. **Group-observed** stats cover verified dungeon and raid clears and readable instance DPS/HPS. One witness can share a clear, and repeat reports of the same clear count once. Dungeon reports without a shared run identifier use a 60-second matching window. Combat stats unlock after three clears in the bracket. If the character later installs the addon, eligible witnessed clears before their own tracking began can still contribute.
+At level 60, type `/scs self` to see your current dungeon or raid. Rates appear after Blizzard's damage meter makes a fight readable. Hover over an instance bracket to see duration-weighted lifetime DPS and HPS and their sample counts. Completed and unfinished runs contribute to lifetime averages for you and identifiable same-faction level-60 groupmates, including players without SCS. Duplicate witness reports of a fight count once. Verified clears count toward the combat score, which requires three qualifying clears in a bracket.
 
-Reviews sync between reachable players running the addon. The shown count covers verified reviews on this client. The addon shares an owner's gameplay snapshot when a peer requests it. The damage meter must supply readable samples and dungeon or battleground counts cover observed completions. Your normal `/played` command refreshes the value if you want a newer snapshot.
+Reviews sync between reachable players running the addon. The shown count covers verified reviews on this client. The addon shares the owner's gameplay snapshot and instance fight reports on request. Update to 2.10.0 to see newly collected lifetime DPS and HPS. Dungeon and battleground counts cover observed completions. Your normal `/played` command refreshes the value if you want a newer snapshot.
 
 **Total Reviews Given** counts distinct profiles reviewed by the character. Editing a review keeps the count the same. The value appears after syncing with that character on version 1.2 or later.
-
-Version 1.3 starts a new series of instance combat averages. DPS and HPS use Blizzard's displayed rate for separate, identified dungeon or raid sessions, weighted by session duration. Counts in parentheses indicate readable samples. Sessions with uncertain origin or unavailable meter data are skipped. The profile shows the collection start date when the owner shares the new stats.
 
 **Average Gear Roll** uses numeric group-loot results for equippable gear seen by the character's addon, including wins and losses. Typed `/roll` commands and pass choices are excluded. The sample count appears beside the average.
 

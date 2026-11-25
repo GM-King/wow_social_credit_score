@@ -447,7 +447,7 @@ one.g.clock = now
 
 one.lua.execute("""
 local zone = 'none'
-function GetInstanceInfo() return 'Zone',zone,1,5,0,false,false,zone == 'party' and 36 or 1,5 end
+function GetInstanceInfo() return 'Zone',zone,1,'Normal',5,0,false,zone == 'party' and 36 or 1,5 end
 emit('PLAYER_ENTERING_WORLD')
 emit('PLAYER_REGEN_DISABLED')
 meterSample(6, 20, 999, 999)
@@ -480,7 +480,7 @@ one.lua.execute("""
 emit('LFG_COMPLETION_REWARD')
 emit('LFG_COMPLETION_REWARD')
 local dungeon = GetInstanceInfo
-function GetInstanceInfo() return 'World','none',0,0,0,false,false,1 end
+function GetInstanceInfo() return 'World','none',0,"Normal", 0, 0, false,1 end
 local world = GetInstanceInfo
 for i = 1, 2 do
     GetInstanceInfo = world
@@ -493,7 +493,7 @@ GetInstanceInfo = world
 emit('ZONE_CHANGED_NEW_AREA')
 emit('PLAYER_REGEN_DISABLED')
 meterSample(9, 10, 999, 999)
-function GetInstanceInfo() return 'Raid','raid',1,20,0,false,false,17 end
+function GetInstanceInfo() return 'Raid','raid',1,"Normal", 20, 0, false,17 end
 emit('ZONE_CHANGED_NEW_AREA')
 emit('PLAYER_REGEN_ENABLED')
 emit('PLAYER_REGEN_DISABLED')
@@ -522,7 +522,8 @@ assert reader.s.ImportStats(one.name, one.s.ExportStats(True), True)
 snapshot = reader.s.db.stats[one.name]
 assert snapshot.ratesSince and snapshot.rollSum / snapshot.rollCount == 55 and snapshot.rollCount == 2
 assert snapshot.explicitWords == 2 and snapshot.runs[5] == 3 and snapshot.runs[20] == 0
-assert [snapshot.rates[5][i] for i in range(1, 7)] == [10000, 40, 2, 0, 10, 1]
+owner_rates = one.s.ProfileStats(one.name).rates[5]
+assert [owner_rates[i] for i in range(1, 7)] == [10000, 40, 2, 0, 10, 1]
 assert snapshot.rates[20] is None
 assert reader.s.ImportNeedGreed(one.name, one.s.ExportNeedGreed())
 assert snapshot.needGreed.need == 1 and snapshot.needGreed.greed == 1
@@ -543,8 +544,8 @@ assert reader.g.SocialCreditSystemProfile.stats[7].text == "Need-to-Greed  2:1"
 
 one.lua.execute("""
 local lock = 0
-local raid = function() return 'Raid','raid',1,20,0,false,false,17 end
-local world = function() return 'World','none',0,0,0,false,false,1 end
+local raid = function() return 'Raid','raid',1,"Normal", 20, 0, false,17 end
+local world = function() return 'World','none',0,"Normal", 0, 0, false,1 end
 function GetNumSavedInstances() return 1 end
 function GetSavedInstanceInfo() return 'Raid',lock,3600,1,true,false,0,true,20,'Normal',3,3 end
 for i = 1, 3 do
@@ -734,12 +735,12 @@ function C_DamageMeter.GetCombatSessionFromID(id, kind)
     return session
 end
 emit('GROUP_ROSTER_UPDATE')
-function witnessedRun(id, damage, swapped)
+function witnessedRun(id, damage, swapped, partial)
     observedDPS = damage
     lateHealing = false
-    function GetInstanceInfo() return 'World','none',0,0,0,false,false,1 end
+    function GetInstanceInfo() return 'World','none',0,"Normal", 0, 0, false,1 end
     emit('ZONE_CHANGED_NEW_AREA')
-    function GetInstanceInfo() return 'Dungeon','party',1,5,0,false,false,55 end
+    function GetInstanceInfo() return 'Dungeon','party',1,"Normal", 5, 0, false,55 end
     emit('ZONE_CHANGED_NEW_AREA')
     emit('PLAYER_REGEN_DISABLED')
     meterSample(id, 10, 100, 50)
@@ -749,13 +750,15 @@ function witnessedRun(id, damage, swapped)
         emit('GROUP_ROSTER_UPDATE')
     end
     emit('PLAYER_REGEN_ENABLED')
-    emit('LFG_COMPLETION_REWARD')
-    emit('LFG_COMPLETION_REWARD')
+    if not partial then
+        emit('LFG_COMPLETION_REWARD')
+        emit('LFG_COMPLETION_REWARD')
+    end
     tick(clock + .5)
     lateHealing = true
     emit('DAMAGE_METER_COMBAT_SESSION_UPDATED', 1, id)
     tick(clock + .5)
-    function GetInstanceInfo() return 'World','none',0,0,0,false,false,1 end
+    function GetInstanceInfo() return 'World','none',0,"Normal", 0, 0, false,1 end
     emit('ZONE_CHANGED_NEW_AREA')
     UnitInRange = function(unit) return unit == 'party1' end
 end
@@ -802,12 +805,12 @@ state.db.stats[key] = {level60Since=latest, runs={[5]=1}, dungeons=1,
 state.InvalidateScores()
 local combined = state.ProfileStats(key)
 assert(combined.runs[5] == 3 and combined.groupRuns[5] == 2)
-assert(combined.rates[5][1] == 12000)
+assert(combined.rates[5][1] == 17000)
 """)
 
 first.lua.execute("""
 local S = state
-function GetInstanceInfo() return 'Raid','raid',1,20,0,false,false,17 end
+function GetInstanceInfo() return 'Raid','raid',1,"Normal", 20, 0, false,17 end
 function GetNumSavedInstances() return 1 end
 local kills = 2
 function GetSavedInstanceInfo() return 'Raid',42,3600,1,true,false,0,true,20,'Normal',3,kills end
@@ -820,7 +823,7 @@ emit('UPDATE_INSTANCE_INFO')
 local key = 'silent-adventurer'
 assert(S.ProfileStats(key).groupRuns[20] == 1)
 assert(S.ProfileStats('remote-adventurer') == nil)
-function GetInstanceInfo() return 'World','none',0,0,0,false,false,1 end
+function GetInstanceInfo() return 'World','none',0,"Normal", 0, 0, false,1 end
 emit('ZONE_CHANGED_NEW_AREA')
 emit('PLAYER_REGEN_DISABLED')
 meterSample(77, 10, 99999, 99999)
@@ -828,6 +831,82 @@ emit('PLAYER_REGEN_ENABLED')
 assert(S.ProfileStats(key).groupRuns[20] == 1)
 assert(S.ProfileStats(key).rates[20][2] == 0)
 """)
+
+# Matching partial runs survive logout, sync to a third client and never create a clear.
+first.lua.execute("function UnitInRange(unit) return unit == 'party1' end")
+first.g.clock = second.g.clock = now + 2
+first.g.witnessedRun(81, 600, False, True)
+second.g.witnessedRun(181, 700, False, True)
+first.g.emit("PLAYER_LOGOUT")
+first.g.SocialCreditDB.instanceFights = first.lua.table()
+first.s.me = None
+first.g.emit("PLAYER_LOGIN")
+assert first.s.ProfileStats(key).rates[5][2] == 30
+now += 195
+advance(observers, 1)
+for observer in observers:
+    observer.g.tickers[60]()
+advance(observers, 5)
+assert viewer.s.LookupGroupProfile(key, True)
+advance(observers, 15)
+stats = viewer.s.ProfileStats(key)
+assert stats.runs[5] == 3 and stats.rates[5][2] == 50 and stats.rates[5][1] == 23000
+
+# Load a 2.9.0 owner snapshot and a delayed instance, then verify manual boss credit.
+returning = Client("Returning Raider", saved="""
+SocialCreditDB = {version=1, stats={["returning-raider"] = {
+    level60Since=1770000001, ratesSince=1770000001, dungeons=2,
+    runs={[5]=2}, rates={[5]={500, 10, 1, 0, 0, 0}}, raidRuns={}, completedLocks={},
+}}}
+""")
+returning.lua.execute("""
+local S, profile = state
+local ready, inside = false, true
+function IsInInstance() return inside, inside and "party" or "none" end
+function GetInstanceInfo()
+    if ready and inside then return "Test Depths", "party", 1, "Normal", 5, 0, false, 36, 5 end
+    return "World", "none", 0, "", 0, 0, false, 1, 0
+end
+C_EncounterJournal = {GetInstanceForGameMap = function(map) assert(map == 36); return 63 end}
+function EJ_GetEncounterInfoByIndex(index, journal)
+    assert(journal == 63)
+    if index <= 2 then return "Boss", "", 40 + index, 0, "", 63, 400 + index, 36 end
+end
+SlashCmdList.SOCIALCREDITSYSTEM("self")
+profile = SocialCreditSystemProfile
+emit("PLAYER_ENTERING_WORLD", false, true)
+assert(not S.ActiveInstance())
+ready = true
+tick(clock + .3)
+assert(S.ActiveInstance() == "Test Depths" and profile.activeInstance.text:find("Waiting for meter data"))
+local run = S.db.stats[S.me.key].run
+emit("ZONE_CHANGED_NEW_AREA")
+assert(S.db.stats[S.me.key].run == run)
+emit("PLAYER_REGEN_DISABLED")
+clock = clock + 10
+emit("PLAYER_REGEN_ENABLED")
+-- The archive session appears only after leaving combat.
+meterSample(31, 10, 100, nil)
+tick(clock + .3)
+assert(profile.activeInstance.text:find("100 DPS"))
+assert(S.ProfileStats(S.me.key).rates[5][1] == 1500)
+assert(S.ProfileStats(S.me.key).runs[5] == 2)
+emit("PLAYER_LOGOUT")
+emit("PLAYER_ENTERING_WORLD", false, true)
+assert(S.db.stats[S.me.key].run == run and select(2, S.ActiveInstance())[1] == 1000)
+emit("ENCOUNTER_END", 401, "First boss", 1, 5, 1)
+assert(S.ProfileStats(S.me.key).runs[5] == 2)
+emit("ENCOUNTER_END", 402, "Last boss", 1, 5, 1)
+emit("LFG_COMPLETION_REWARD")
+assert(S.ProfileStats(S.me.key).runs[5] == 3 and S.ProfileStats(S.me.key).rates[5][1] == 1500)
+inside = false
+emit("ZONE_CHANGED_NEW_AREA")
+assert(not S.ActiveInstance() and profile.activeInstance.text == "")
+inside = true
+emit("PLAYER_ENTERING_WORLD", false, false)
+assert(S.db.stats[S.me.key].run ~= run and not select(2, S.ActiveInstance()))
+""")
+print("PASS: Forever instance entry and manual clear, partial fights, witness deduplication and upgrade")
 
 author, guildmate, outsider, target = (Client(name) for name in
     ("Zero Reviewer", "Guild Viewer", "Other Viewer", "Test Subject"))
@@ -868,7 +947,7 @@ p.editor.save.OnClick()
 local confirmed = popup
 StaticPopupDialogs[confirmed.which].OnAccept(nil, confirmed.data)
 assert(S.ReviewAverage(key) == 1 and S.BlackMarkReviewers(key)[1] == "Your review")
-assert(p.blacklist.shown and p.blackPortrait.shown and p.rows[1].zero.shown)
+assert(p.blackMark.shown and p.blackPortrait.shown and p.rows[1].zero.shown)
 assert(S.Reviews(key, "Negative")[1].stars == 0)
 assert(select(5, S.Composite(key, 0)) == 0)
 """)
@@ -954,7 +1033,7 @@ assert(S.openSubject == key)
 function GetNumGuildMembers() return 0 end
 emit("GUILD_ROSTER_UPDATE")
 tick(clock + .2)
-assert(not SocialCreditSystemProfile.blacklist.shown and not render("Player-1-1234"))
+assert(not SocialCreditSystemProfile.blackMark.shown and not render("Player-1-1234"))
 function GetNumGuildMembers() return 1 end
 emit("GUILD_ROSTER_UPDATE")
 assert(S.BlackMarkReviewers(key))
@@ -1001,8 +1080,8 @@ C_Traits = {
 }
 Constants = {TraitConsts = {INSPECT_TRAIT_CONFIG_ID = 99}}
 function GetInstanceInfo()
-    if inside then return "Dungeon", "party", 1, 5, 0, false, false, 50 end
-    return "World", "none", 0, 0, 0, false, false, 1
+    if inside then return "Dungeon", "party", 1, "Normal", 5, 0, false, 50 end
+    return "World", "none", 0, "Normal", 0, 0, false, 1
 end
 function enterDungeon(value)
     inside = value
@@ -1039,7 +1118,7 @@ emit("LFG_COMPLETION_REWARD")
 local tank, nonTank = S.BuildStats(S.me.key, 101, "T"), S.BuildStats(S.me.key, 101, "N")
 assert(tank[5].clears == 1 and tank[5].rate[1] == 1000)
 assert(nonTank[5].clears == 1 and nonTank[5].rate[1] == 3000)
-assert(S.db.stats[S.me.key].runs[5] == 1 and S.db.stats[S.me.key].rates[5][1] == 103990)
+assert(S.db.stats[S.me.key].runs[5] == 1 and S.ProfileStats(S.me.key).rates[5][1] == 103990)
 enterDungeon(false)
 talentConfig = 3
 emit("ACTIVE_TALENT_GROUP_CHANGED")
@@ -1167,7 +1246,7 @@ for _, suffix in ipairs({"One", "Two", "Three", "Four"}) do
     assert(S.Merge({author=S.Identity(name), name=name, subject=key, subjectName="Test Subject",
         revision=1, time=S.Now(), stars=4, text="", level60=true}, true))
 end
-assert(select(2, S.ReviewAverage(key)) == 3.2 and p.blacklist.shown)
+assert(select(2, S.ReviewAverage(key)) == 3.2 and p.blackMark.shown)
 p.edit.OnClick()
 assert(p.editor.delete.shown)
 p.editor.body:SetText("Unsaved draft")
@@ -1186,7 +1265,7 @@ p.editor.delete.OnClick()
 local accepted = popup
 StaticPopupDialogs[accepted.which].OnAccept(nil, accepted.data)
 assert(not p.editorShade:IsVisible() and p.edit.caption.text == "Write review")
-assert(not p.blacklist.shown and p.score.text == "Social Credit Score —")
+assert(not p.blackMark.shown and p.score.text == "Social Credit Score —")
 assert(S.ReviewAverage(key) == 4 and select(2, S.ReviewAverage(key)) == nil)
 assert(#S.Reviews(key, "Newest") == 4 and #S.Reviews(key, "Positive") == 4)
 assert(#S.Reviews(key, "Negative") == 0 and S.ExportReviewsGiven():match("~0$"))
