@@ -1,6 +1,6 @@
 # Social Credit System
 
-[Download 2.10.0](https://gm-king.github.io/wow_social_credit_score/downloads/SocialCreditSystem-2.10.0.zip) · [Installation and player guide](https://gm-king.github.io/wow_social_credit_score/)
+[Download 2.11.0](https://gm-king.github.io/wow_social_credit_score/downloads/SocialCreditSystem-2.11.0.zip) · [Installation and player guide](https://gm-king.github.io/wow_social_credit_score/)
 
 Characters at any level can view and review known same-faction profiles. A character's 0-1000 Social Credit Score unlocks at level 60 after reviews from five distinct authors. Reviews received while leveling count automatically. Use the close button or Escape to close the profile in combat.
 
@@ -22,9 +22,11 @@ In version 2.8, the original author can choose **Delete review** from the review
 
 **Group Finder → Browse** shows locally available Social Credit Scores for eligible players and labels group listings with their leader's score. Hover over a listing for its review averages and counts, including named group members when available. An asterisk flags a provisional score. A dash indicates that a score is unavailable.
 
-At level 60, type `/scs self` to see your current dungeon or raid. Rates appear after Blizzard's damage meter makes a fight readable. Hover over an instance bracket to see duration-weighted lifetime DPS and HPS and their sample counts. Completed and unfinished runs contribute to lifetime averages for you and identifiable same-faction level-60 groupmates, including players without SCS. Duplicate witness reports of a fight count once. Verified clears count toward the combat score, which requires three qualifying clears in a bracket.
+Use `/scs self` to view your personal stats. At level 60, it also shows your current dungeon or raid. Rates appear after Blizzard's damage meter makes a fight readable. Hover over an instance bracket to see duration-weighted lifetime DPS and HPS and their sample counts. Completed and unfinished runs contribute to lifetime averages for you and identifiable same-faction level-60 groupmates, including players without SCS. Duplicate witness reports of a fight count once. Verified clears count toward the combat score, which requires three qualifying clears in a bracket.
 
-Reviews sync between reachable players running the addon. The shown count covers verified reviews on this client. The addon shares the owner's gameplay snapshot and instance fight reports on request. Update to 2.10.0 to see newly collected lifetime DPS and HPS. Dungeon and battleground counts cover observed completions. Your normal `/played` command refreshes the value if you want a newer snapshot.
+Open **Guilds** from the minimap menu to see known same-faction guilds on your server ranked by average member SCS. A guild appears once your client knows the scores of five distinct members. Membership and scores reflect the profiles your addon has observed.
+
+Reviews sync by addon whisper between reachable players running SCS. Peers discover one another through guild, party, and raid messages or direct profile lookups. The shown count covers verified reviews on this client. The addon shares the owner's gameplay snapshot and instance fight reports on request. Dungeon and battleground counts cover observed completions. Your normal `/played` command refreshes the value if you want a newer snapshot.
 
 **Total Reviews Given** counts distinct profiles reviewed by the character. Editing a review keeps the count the same. The value appears after syncing with that character on version 1.2 or later.
 

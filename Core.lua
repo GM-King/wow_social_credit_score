@@ -69,7 +69,7 @@ function S.Unit(unit, anyFaction)
         if not guild and S.Call(IsInGuild) == false and unit == "player" then guild = "" end
         if not guild and S.Call(UnitIsInGuild, unit) == false then guild = "" end
         return {key = key, name = display, address = address, level = S.Call(UnitLevel, unit),
-            class = class, faction = faction, guild = guild}
+            class = class, faction = faction, guild = guild, guildRealm = guild and S.realm}
     end
 end
 
@@ -198,8 +198,9 @@ end
 
 function S.Remember(profile)
     local old = S.db.profiles[profile.key]
-    if old and profile.guild == nil then profile.guild = old.guild end
     if old and old.faction == profile.faction then
+        if profile.guild == nil then profile.guild = old.guild end
+        if profile.guildRealm == nil and profile.guild == old.guild then profile.guildRealm = old.guildRealm end
         if profile.level == nil then profile.level = old.level end
         if profile.class == nil then profile.class = old.class end
     end
@@ -210,6 +211,8 @@ function S.Remember(profile)
     end
     if S.InvalidateScores and (not old or old.class ~= profile.class or old.level ~= profile.level
         or old.faction ~= profile.faction) then S.InvalidateScores() end
+    if S.QueuePlayerHistoryRefresh and old
+        and (old.guild ~= profile.guild or old.guildRealm ~= profile.guildRealm) then S.QueuePlayerHistoryRefresh() end
 end
 
 local function saveReview(subject, stars, body, deleting, expectedRevision)
@@ -252,6 +255,7 @@ local function activate(level)
     end
     S.db.reviews = {}
     S.faction = S.Call(UnitFactionGroup, "player")
+    S.realm = S.Call(GetRealmName) or S.Call(GetNormalizedRealmName)
     S.me = S.Unit("player", true)
     if not S.me or not S.faction then
         S.me = nil

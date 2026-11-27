@@ -1,0 +1,7 @@
+package-as: SocialCreditSystem
+ignore:
+  - build_release.py
+  - dist
+  - docs
+  - README.md
+  - tests

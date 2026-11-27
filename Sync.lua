@@ -8,7 +8,6 @@ local maxPeers, maxQueue = 64, 256
 local peerLifetime, discoveryCooldown = 150, 90
 local offlineUntil, lastWhisper = {}, {}
 local presence, presenceAt
-local channelName
 local groupRequests, groupCooldowns, lookups = {}, {}, {}
 local lookupTimer
 local talentPublish
@@ -239,8 +238,6 @@ local function hello()
     end
     if IsInRaid() then advertise("RAID")
     elseif IsInGroup() then advertise("PARTY") end
-    local channel = channelName and S.Call(GetChannelName, channelName)
-    if type(channel) == "number" and channel > 0 then advertise("CHANNEL", tostring(channel)) end
 end
 
 function S.AdvertiseLevel()
@@ -342,6 +339,7 @@ end
 function S.Query(subject)
     if not S.Viewable(subject) or S.db.alts[subject] then return end
     hello()
+    if not canWhisper(subject) then S.FindProfile(S.db.names[subject]) end
     if S.Eligible(subject) then S.LookupGroupProfile(subject, true) end
     fresh(subject, subject)
     local candidates = {}
@@ -474,8 +472,10 @@ local function receive(body, route, key, address)
         if observed and observed ~= level then return end
         if not observed and peer and peer.level and level < peer.level then return end
         local _, display = S.Identity(address)
+        if observed and target.guild ~= nil then guild = target.guild end
         S.Remember({key = key, level = level, class = class, faction = faction,
-            name = display, guild = guild ~= "?" and guild or nil})
+            name = display, guild = guild ~= "?" and guild or nil,
+            guildRealm = observed and target.guildRealm or nil})
         local new = not peers[key]
         if new then
             local count, oldest = 0, key
@@ -582,6 +582,7 @@ end
 S.On("CHAT_MSG_ADDON", function(tag, packet, route, sender)
     if not S.me or not S.Readable(tag) or tag ~= prefix or not S.Readable(packet)
         or not S.Readable(route) then return end
+    if route ~= "GUILD" and route ~= "PARTY" and route ~= "RAID" and route ~= "WHISPER" then return end
     local key, _, address = S.Identity(sender)
     if not key or S.db.alts[key] or type(packet) ~= "string" or #packet > 220 then return end
     local now = GetTime()
@@ -619,12 +620,8 @@ end)
 S.OnActive(function()
     if not S.me or not C_ChatInfo then return end
     C_ChatInfo.RegisterAddonMessagePrefix(prefix)
-    channelName = "SocialCredit" .. S.faction
     local function discover()
         if blocked() then return end
-        if JoinTemporaryChannel and S.Call(GetChannelName, channelName) == 0 then
-            S.Call(JoinTemporaryChannel, channelName)
-        end
         hello()
         local recent = {}
         for key, peer in pairs(peers) do

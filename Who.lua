@@ -27,7 +27,7 @@ local function profileFor(name, level, guild, class, label)
     if old and (old.faction ~= S.faction or (old.level and old.level > level)) then return end
     if not S.Readable(guild) or type(guild) ~= "string" or guild:find("[%c|]") then guild = nil end
     return {key = key, name = display, level = level, faction = S.faction,
-        class = classToken(class, label), guild = guild}
+        class = classToken(class, label), guild = guild, guildRealm = guild and S.realm}
 end
 
 function S.FindWhoProfile(key)

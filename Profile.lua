@@ -277,7 +277,7 @@ local function build()
     for i = 1, 9 do f.stats[i] = label(f, 38, 341 + (i - 1) * 15, 215, "GameFontHighlightSmall") end
     f.stats[9]:SetMaxLines(4)
 
-    label(f, 304, 165, 126, "GameFontHighlightLarge", cream, "Reviews")
+    f.reviewHeading = label(f, 304, 165, 126, "GameFontHighlightLarge", cream, "Reviews")
     f.filters = {}
     for i, choice in ipairs({"Newest", "Negative", "Positive"}) do
         f.filters[choice] = button(f, 507 + (i - 1) * 88, 158, 83, choice, function()
@@ -486,13 +486,18 @@ function S.Refresh(subject)
     if S.db.alts[subject] and not selfProfile then return end
     local verified = S.Viewable(subject)
     if not verified and not frame.preview then frame:Hide(); return end
-    local rows = S.Reviews(subject, filter)
-    local count, average, score, provisional, population, reviewers, brackets, review, combat = S.RatingSummary(subject)
+    local rows, count, average, score, provisional, population, reviewers, brackets, review, combat
     local eligible = S.Eligible(subject)
-    if not eligible then count = S.ReviewAverage(subject) end
+    if selfProfile then
+        rows = {}
+    else
+        rows = S.Reviews(subject, filter)
+        count, average, score, provisional, population, reviewers, brackets, review, combat = S.RatingSummary(subject)
+        if not eligible then count = S.ReviewAverage(subject) end
+    end
     local tier = S.Tier(score)
     local profile = S.db.profiles[subject] or {}
-    local marked = verified and S.BlackMarkReviewers(subject) ~= nil
+    local marked = not selfProfile and verified and S.BlackMarkReviewers(subject) ~= nil
     frame.name:SetWidth(marked and 315 or 410)
     frame.blackMark:ClearAllPoints()
     frame.blackMark:SetPoint("LEFT", frame.name, "LEFT", math.min(frame.name:GetStringWidth(), 315) + 8, 0)
@@ -521,7 +526,9 @@ function S.Refresh(subject)
     frame.edit.caption:SetText(not verified and "Review unavailable" or owner and (owns and (editing and "Edit review" or "Write review")
         or "Review slot on " .. (select(2, S.Identity(owner)) or owner))
         or "Write review")
+    frame.reviewHeading:SetShown(not selfProfile)
     for choice, b in pairs(frame.filters) do
+        b:SetShown(not selfProfile)
         local selected = choice == filter
         b.caption:SetTextColor(unpack(selected and gold or muted))
         local color = selected and gold or inactive
@@ -530,6 +537,9 @@ function S.Refresh(subject)
     local pages = math.max(1, math.ceil(#rows / perPage))
     page = math.max(1, math.min(pages, page))
     frame.page:SetText(page .. " / " .. pages)
+    frame.page:SetShown(not selfProfile)
+    frame.previous:SetShown(not selfProfile)
+    frame.next:SetShown(not selfProfile)
     frame.previous:SetEnabled(page > 1)
     frame.next:SetEnabled(page < pages)
     frame.empty:SetText(selfProfile and "Personal combat and character stats" or #rows == 0 and ("No " .. (filter == "Newest" and "" or filter:lower() .. " ") .. "reviews") or "")
@@ -557,6 +567,12 @@ function S.Refresh(subject)
             slot.stamp:SetText(date("%d %b %Y", row.time))
             slot.body:SetText(row.text ~= "" and row.text or "Rating only")
             S.PaintAverageStars(slot.icons, row.stars, 16)
+        elseif selfProfile then
+            slot.name:SetText("")
+            slot.stamp:SetText("")
+            slot.body:SetText("")
+            S.PaintAverageStars(slot.icons, nil, 16)
+            if GameTooltip and GameTooltip:IsOwned(slot.card) then GameTooltip:Hide() end
         end
     end
     local instanceName, instanceRates
@@ -570,7 +586,8 @@ function S.Refresh(subject)
     for i, line in ipairs(rates) do frame.rates[i]:SetText(line) end
     for i, line in ipairs(stats) do frame.stats[i]:SetText(line) end
     local last = S.db.synced[subject]
-    frame.status:SetText(frame.preview and (frame.lookupStatus or "Checking profile...") or shared .. "  ·  Counts since tracking began  ·  "
+    frame.status:SetText(selfProfile and "Counts since tracking began"
+        or frame.preview and (frame.lookupStatus or "Checking profile...") or shared .. "  ·  Counts since tracking began  ·  "
         .. (last and "Synced " .. date("%d %b %H:%M", last) or "Local review data"))
 end
 
@@ -586,6 +603,7 @@ local function open(key, unit, returnTo, preview)
     pendingProfile = nil
     dismissConfirmation()
     frame.editorShade:Hide()
+    if selfProfile and GameTooltip then GameTooltip:Hide() end
     frame.returnTo = returnTo
     frame.preview, frame.lookupStatus = preview or false, false
     frame.back:SetShown(returnTo ~= nil)

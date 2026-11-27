@@ -4,7 +4,7 @@ local width, height, rowWidth = 720, 560, 666
 local media = "Interface\\AddOns\\" .. addon .. "\\Media\\"
 local units, refreshQueued = {}
 local window, minimapButton, tab
-local roster, entries, offsets = {}, {}, {Recent = 0, Reviewed = 0}
+local roster, entries, offsets = {}, {}, {Recent = 0, Reviewed = 0, Guilds = 0}
 
 local function recent()
     local history = S.db.recentPlayers
@@ -40,6 +40,39 @@ local function reviewed()
     return rows
 end
 
+local function guilds()
+    local totals, rows = {}, {}
+    if not S.realm then return rows end
+    for key, profile in pairs(S.db.profiles) do
+        local name = profile.guild
+        if profile.guildRealm == S.realm and type(name) == "string" and name ~= "" then
+            local _, _, score = S.RatingSummary(key)
+            if score then
+                local guildKey = name:lower()
+                local guild = totals[guildKey] or {name = name, total = 0, count = 0}
+                guild.name = name < guild.name and name or guild.name
+                guild.total, guild.count = guild.total + score, guild.count + 1
+                totals[guildKey] = guild
+            end
+        end
+    end
+    for _, guild in pairs(totals) do
+        if guild.count >= 5 then
+            guild.average = guild.total / guild.count
+            rows[#rows + 1] = guild
+        end
+    end
+    table.sort(rows, function(a, b)
+        if a.average ~= b.average then return a.average > b.average end
+        return a.name:lower() < b.name:lower()
+    end)
+    return rows
+end
+
+local tabEntries = {Recent = recent, Reviewed = reviewed, Guilds = guilds}
+local emptyText = {Recent = "No recent players", Reviewed = "No reviews written",
+    Guilds = "No known guilds with five scored members on this server"}
+
 local function elapsed(stamp)
     local age = math.max(0, S.Now() - stamp)
     if age < 60 then return "Just now" end
@@ -63,6 +96,22 @@ local function updateUnits()
 end
 
 local function paintRow(button, entry, index)
+    button.background:SetColorTexture(.15, .095, .084, index % 2 == 0 and 1 or .64)
+    local guild = tab == "Guilds"
+    button.rank:SetShown(guild)
+    button.portrait:SetShown(not guild)
+    button.border:SetShown(not guild)
+    button:SetEnabled(not guild)
+    if guild then
+        button.mark:Hide()
+        button.rank:SetText(tostring(index))
+        button.name:SetText(entry.name)
+        button.metadata:SetText(("%d scored members"):format(entry.count))
+        button.detail:SetText("")
+        button.score:SetText(("%.2f SCS"):format(entry.average))
+        button.tier:SetText("Guild average")
+        return
+    end
     local key = entry.subject or entry.key
     local profile = S.db.profiles[key]
     local class = profile and profile.class
@@ -73,7 +122,6 @@ local function paintRow(button, entry, index)
     S.PaintProfilePortrait(button.portrait, observed and observed.key == key and unit, class)
     S.PaintProfileBorder(button.border, tier)
     button.mark:SetShown(S.BlackMarkReviewers(key) ~= nil)
-    button.background:SetColorTexture(.15, .095, .084, index % 2 == 0 and 1 or .64)
     button.name:SetText(entry.subjectName or entry.name)
     local metadata = {}
     if profile then
@@ -108,16 +156,17 @@ end
 
 function S.RefreshPlayerHistory()
     if not window or not window:IsShown() then return end
-    updateUnits()
-    entries = tab == "Recent" and recent() or reviewed()
+    if tab ~= "Guilds" then updateUnits() end
+    entries = tabEntries[tab]()
     local offset = math.min(offsets[tab], math.max(0, #entries - visibleRows) * rowHeight)
     window.content:SetHeight(math.max(visibleRows, #entries) * rowHeight)
     window.scroll:UpdateScrollChildRect()
     window.scroll:SetVerticalScroll(offset)
     render(offset)
-    window.empty:SetText(#entries == 0 and (tab == "Recent" and "No recent players" or "No reviews written") or "")
+    window.empty:SetText(#entries == 0 and emptyText[tab] or "")
     window.Recent:SetEnabled(tab ~= "Recent")
     window.Reviewed:SetEnabled(tab ~= "Reviewed")
+    window.Guilds:SetEnabled(tab ~= "Guilds")
 end
 
 function S.QueuePlayerHistoryRefresh()
@@ -149,7 +198,10 @@ local function scanGroup()
             current[player.key] = true
             if player.faction == S.faction and S.Readable(player.level) and player.level and player.level > 0 then
                 local known = S.db.profiles[player.key]
-                if not known or known.level ~= player.level or known.faction ~= player.faction then S.Remember(player) end
+                if not known or known.level ~= player.level or known.faction ~= player.faction
+                    or (player.guild ~= nil and (known.guild ~= player.guild or known.guildRealm ~= player.guildRealm)) then
+                    S.Remember(player)
+                end
             end
             if not previous[player.key] then
                 record(player.key, player.name, "Group")
@@ -218,7 +270,7 @@ local function buildHistory()
     close:SetPoint("TOPRIGHT", -3, -4)
     close:SetScript("OnClick", function() f:Hide() end)
 
-    for index, name in ipairs({"Recent", "Reviewed"}) do
+    for index, name in ipairs({"Recent", "Reviewed", "Guilds"}) do
         local button = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
         f[name] = button
         button:SetSize(108, 24)
@@ -269,6 +321,7 @@ local function buildHistory()
         row.border:SetPoint("CENTER", row.portrait)
         row.border:SetSize(55, 55)
         row.mark = S.CreateBlackMark(row, row.portrait, 15)
+        row.rank = rowText(row, "GameFontNormalLarge", "LEFT", 18, 0, 45)
         row.name = rowText(row, "GameFontNormal", "LEFT", 70, 15, 400)
         row.metadata = rowText(row, "GameFontHighlightSmall", "LEFT", 70, 0, 400)
         row.detail = rowText(row, "GameFontDisableSmall", "LEFT", 70, -15, 400)
@@ -276,7 +329,7 @@ local function buildHistory()
         row.tier = rowText(row, "GameFontNormalSmall", "RIGHT", -15, -10, 165)
         row:SetScript("OnClick", function(self)
             local entry = self.entry
-            if entry then S.OpenNamedProfile(entry.subjectName or entry.name, showHistory) end
+            if entry and tab ~= "Guilds" then S.OpenNamedProfile(entry.subjectName or entry.name, showHistory) end
         end)
     end
     return f

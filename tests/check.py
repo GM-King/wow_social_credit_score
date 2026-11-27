@@ -1777,3 +1777,82 @@ print("PASS: minimap history, navigation, whisper and roster deduplication, and 
 print("PASS: level-60 promotion, pre-60 review sync, and combat close handlers")
 print("PASS: review deletion, backup and reconnect sync, native and Prat chat, half-star layout, talent benchmarks, and existing regressions")
 
+release_client = Client("Release Tester", saved="""
+function JoinTemporaryChannel() error("Joined a custom channel") end
+function GetChannelName() error("Looked up a custom channel") end
+""")
+release_client.lua.execute("""
+local S = state
+local channelCalls = 0
+function JoinTemporaryChannel() channelCalls = channelCalls + 1 end
+function GetChannelName() channelCalls = channelCalls + 1; return 1 end
+tick(clock + 4)
+tickers[60]()
+tick(clock + 1)
+assert(channelCalls == 0)
+assert(outbox[1][3] == "GUILD")
+for _, packet in ipairs(outbox) do assert(packet[3] ~= "CHANNEL") end
+emit("CHAT_MSG_ADDON", "SocialCredit2", "990:1:1:H~Horde~60~WARRIOR~Old Guild", "CHANNEL", "Old Peer")
+assert(S.db.profiles["old-peer"] == nil)
+
+assert(S.SaveReview("test-subject", 4, "A visible review"))
+SlashCmdList.SOCIALCREDITSYSTEM("")
+local profile = SocialCreditSystemProfile
+assert(profile.rows[1].fullText == "A visible review" and profile.reviewHeading:IsShown())
+SlashCmdList.SOCIALCREDITSYSTEM("self")
+assert(S.openSubject == S.me.key and profile.score.text == "Your character")
+assert(not profile.reviewHeading:IsShown() and not profile.filters.Newest:IsShown())
+assert(not profile.edit:IsShown() and not profile.page:IsShown())
+assert(not profile.previous:IsShown() and not profile.next:IsShown())
+assert(not profile.rows[1].card:IsShown() and not profile.rows[1].fullText and profile.rows[1].body.text == "")
+SlashCmdList.SOCIALCREDITSYSTEM("")
+assert(profile.reviewHeading:IsShown() and profile.filters.Newest:IsShown() and profile.page:IsShown())
+assert(profile.rows[1].card:IsShown() and profile.rows[1].fullText == "A visible review")
+profile:Hide()
+
+local scoreByKey = {}
+local ratingSummary = S.RatingSummary
+S.RatingSummary = function(key)
+    local score = S.Viewable(key) and scoreByKey[key]
+    if score then return 5, 4, score, true end
+    return ratingSummary(key)
+end
+local function member(wing, index, guild, score, realm)
+    local name = wing .. " " .. string.char(64 + index)
+    local key = S.Identity(name)
+    scoreByKey[key] = score
+    S.Remember({key = key, name = name, guild = guild, guildRealm = realm, faction = S.faction, level = 60})
+end
+local icon = SocialCreditSystemMinimapButton
+icon:OnClick()
+local list = SocialCreditSystemHistory
+for i = 1, 5 do
+    member("Bright", i, "Bright", 900, S.realm)
+    member("Amber", i, "Amber", 700, S.realm)
+    member("Cedar", i, "Cedar", 700, S.realm)
+    member("Remote", i, "Remote", 1000, "Another Realm")
+    member("Legacy", i, "Legacy", 1000, nil)
+end
+for i = 1, 4 do member("Dusk", i, "Dusk", 1000, S.realm) end
+member("Dusk", 5, "Dusk", nil, S.realm)
+list.Guilds:OnClick()
+assert(list.rows[1].name.text == "Bright" and list.rows[1].rank.text == "1")
+assert(list.rows[1].score.text == "900.00 SCS" and list.rows[1].metadata.text == "5 scored members")
+assert(list.rows[2].entry.name == "Amber" and list.rows[3].entry.name == "Cedar")
+assert(not list.rows[4].entry)
+member("Dusk", 5, "Dusk", 500, S.realm)
+S.InvalidateScores()
+tick(clock + 1)
+assert(list.rows[1].entry.name == "Bright" and list.rows[2].name.text == "Dusk")
+member("Bright", 5, "", 900, S.realm)
+tick(clock + 1)
+assert(list.rows[1].entry.name == "Dusk" and not list.rows[4].entry)
+list.rows[1]:OnClick()
+assert(not S.openSubject)
+list.Reviewed:OnClick()
+assert(list.rows[1].entry.subject == "test-subject" and not list.rows[1].rank:IsShown())
+list.rows[1]:OnClick()
+assert(S.openSubject == "test-subject")
+""")
+print("PASS: channel-free sync, private self profile, and five-member guild rankings")
+
