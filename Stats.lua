@@ -113,6 +113,37 @@ local function instance()
     return ("%s:%d:%d"):format(kind, map, difficulty), kind, capacity, map, name
 end
 
+-- Forever's Master Spelunker objectives, keyed by DungeonEncounter ID.
+local dungeonObjectives = {
+    [437] = 129,  -- Razorfen Downs: Amnennar
+    [554] = 70,   -- Uldaman: Archaedas
+    [600] = 209,  -- Zul'Farrak: Chief Ukorz
+    [429] = 349,  -- Maraudon: Princess Theradras
+    [3409] = 2994, -- Alcaz Prison: Blazeroar
+    [493] = 109,  -- Sunken Temple: Shade of Eranikus
+    [245] = 230,  -- Blackrock Depths: Emperor Dagran Thaurissan
+    [3334] = 2974, -- Blackmaw Hold: Varrox Bleakhoof
+    [275] = 229,  -- Lower Blackrock Spire: Overlord Wyrmthalak
+    [280] = 229,  -- Upper Blackrock Spire: General Drakkisath
+    [463] = 289,  -- Scholomance: Darkmaster Gandling
+    [478] = 329,  -- Stratholme Live: Balnazzar
+    [484] = 329,  -- Stratholme Dead: Baron Rivendare
+    [346] = 429,  -- Dire Maul East: Alzzin
+    [349] = 429,  -- Dire Maul West: Immol'thar
+    [368] = 429,  -- Dire Maul North: King Gordok
+    [3502] = 3001, -- Shaper's Terrace: Nanaya
+}
+local mappedDungeons, multiWing = {}, {[229] = true, [329] = true, [429] = true}
+for _, map in pairs(dungeonObjectives) do mappedDungeons[map] = true end
+
+local function dungeonSize(encounter)
+    return encounter == 280 and 10 or 5
+end
+
+local function dungeonVisit(kind, map)
+    return kind == "party" or (kind == "raid" and map == 229)
+end
+
 local function raidLock()
     if not GetNumSavedInstances or not GetSavedInstanceInfo then return end
     local name, _, difficulty, _, _, _, _, map = S.Call(GetInstanceInfo)
@@ -147,11 +178,13 @@ local function updateInstance()
         if kind then stats.run, run, fight = nil, nil, nil end
         return kind ~= nil
     end
-    if not stats.run or stats.run.key ~= key then stats.run = {key = key} end
+    if not stats.run or stats.run.key ~= key then
+        stats.run = {key = key, lootSince = S.Call(C_LootHistory and C_LootHistory.GetLootHistoryTime)}
+    end
     run = stats.run
     run.kind, run.capacity, run.map, run.name = kind, capacity, map, name
     run.rates = run.rates or {}
-    if kind == "raid" then
+    if kind == "raid" and not dungeonVisit(kind, map) then
         local lock = raidLock()
         if lock then
             local saved = stats.raidRuns[lock]
@@ -190,13 +223,16 @@ local function rateRow(rows, size)
     return rows[size]
 end
 
-local function complete(kind, participants, stamp)
-    if not run or run.kind ~= kind or run.completed or instance() ~= run.key then return end
-    local size = run.capacity
+local function complete(kind, participants, stamp, objective)
+    if not run or run.completed or instance() ~= run.key then return end
+    if kind == "party" then
+        if not dungeonVisit(run.kind, run.map) then return end
+    elseif run.kind ~= kind then return end
+    local size = objective and dungeonSize(objective) or run.capacity
     if kind == "raid" and (not run.lock or stats.completedLocks[run.lock]) then return end
     run.completed = true
     if kind ~= "pvp" then
-        S.SaveGroupClear(run, participants or S.GroupRoster(true), stamp or S.Now())
+        S.SaveGroupClear(run, participants or S.GroupRoster(true), stamp or S.Now(), objective, size)
         S.SaveBuildClear(run, S.me.key, run.ownerBuildRates)
     end
     if kind ~= "raid" then
@@ -205,7 +241,7 @@ local function complete(kind, participants, stamp)
     else
         stats.completedLocks[run.lock] = true
     end
-    if (kind == "party" and size == 5) or (kind == "raid" and (size == 10 or size == 20 or size == 40)) then
+    if (kind == "party" and (size == 5 or size == 10)) or (kind == "raid" and (size == 10 or size == 20 or size == 40)) then
         stats.runs[size] = (stats.runs[size] or 0) + 1
         if run.rates[size] then
             local accumulated = rateRow(stats.rates, size)
@@ -213,11 +249,31 @@ local function complete(kind, participants, stamp)
         end
         S.InvalidateScores()
     end
+    if S.Refresh and S.openSubject == S.me.key then S.Refresh(S.me.key) end
+end
+
+local function nextWing()
+    run = {key = run.key, kind = run.kind, capacity = run.capacity, map = run.map, name = run.name,
+        activeRates = run.activeRates, objectives = run.objectives, rates = {}, lootSince = run.lootSince}
+    stats.run, meterContext = run, run
+end
+
+local function completeObjective(encounter)
+    if not run or not S.Readable(encounter) or dungeonObjectives[encounter] ~= run.map
+        or not dungeonVisit(run.kind, run.map) or instance() ~= run.key then return end
+    run.objectives = run.objectives or {}
+    if run.objectives[encounter] or (run.completed and not next(run.objectives)) then return end
+    if run.completed then nextWing() end
+    run.objectives[encounter] = true
+    complete("party", nil, nil, encounter)
 end
 
 local function combatBucket()
     if not run then return end
-    if run.kind == "party" and run.capacity == 5 then return 5 end
+    if dungeonVisit(run.kind, run.map) then
+        if run.map == 229 and (S.Call(GetNumGroupMembers) or 0) > 5 then return 10 end
+        if run.capacity == 5 or mappedDungeons[run.map] then return 5 end
+    end
     local cap = run.capacity
     if run.kind == "raid" and (cap == 10 or cap == 20 or cap == 40) then return cap end
 end
@@ -354,6 +410,7 @@ S.On("PLAYER_REGEN_DISABLED", function()
     refreshInstance(4)
     local bucket = combatBucket()
     if not bucket or instance() ~= run.key then return end
+    if run.completed and multiWing[run.map] then nextWing() end
     if not baselineReady then baselineReady = discover() end
     if not baselineReady then return end
     local roster, units = S.GroupRoster(true)
@@ -426,10 +483,26 @@ end)
 
 local loot = C_LootHistory
 local waitingForItem = {}
+local function freshBossLoot(encounter, drop)
+    if not dungeonObjectives[encounter] or type(drop) ~= "table" or not S.Readable(drop.startTime)
+        or type(drop.startTime) ~= "number" then return end
+    local now = S.Call(loot.GetLootHistoryTime)
+    if type(now) ~= "number" or now < drop.startTime or now - drop.startTime > 15000 then return end
+    local previous = stats.dungeonLoot and stats.dungeonLoot[encounter]
+    if previous == drop.startTime then return end
+    refreshInstance(4)
+    if not run or run.map ~= dungeonObjectives[encounter]
+        or (run.lootSince and drop.startTime < run.lootSince) then return end
+    stats.dungeonLoot = stats.dungeonLoot or {}
+    stats.dungeonLoot[encounter] = drop.startTime
+    completeObjective(encounter)
+end
+
 local function recordGearRoll(encounter, key)
     if not stats or not loot or not S.Readable(encounter) or not S.Readable(key)
         or type(encounter) ~= "number" or type(key) ~= "number" then return end
     local drop = S.Call(loot.GetSortedInfoForDrop, encounter, key)
+    freshBossLoot(encounter, drop)
     if type(drop) ~= "table" or not S.Readable(drop.startTime) or type(drop.startTime) ~= "number"
         or not S.Readable(drop.itemHyperlink) or type(drop.itemHyperlink) ~= "string"
         or not S.Readable(drop.rollInfos) or type(drop.rollInfos) ~= "table" then return end
@@ -485,7 +558,26 @@ end)
 
 S.On("LFG_COMPLETION_REWARD", function()
     refreshInstance(4)
-    complete("party")
+    local visit = run
+    if not visit or visit.objectives then return end
+    if mappedDungeons[visit.map] then
+        C_Timer.After(2, function()
+            if run ~= visit or visit.objectives then return end
+            if not multiWing[visit.map] then
+                for encounter, map in pairs(dungeonObjectives) do
+                    if map == visit.map then completeObjective(encounter); return end
+                end
+            end
+            complete("party")
+        end)
+    else
+        complete("party")
+    end
+end)
+S.On("BOSS_KILL", function(encounter)
+    if not S.Readable(encounter) or not dungeonObjectives[encounter] then return end
+    refreshInstance(4)
+    completeObjective(encounter)
 end)
 S.On("PVP_MATCH_COMPLETE", function() complete("pvp") end)
 local raidCompletion
@@ -504,6 +596,10 @@ S.On("ENCOUNTER_END", function(encounterID, _, _, _, successful)
     refreshInstance(4)
     if not run or not S.Readable(successful) or successful ~= 1
         or not S.Readable(encounterID) then return end
+    if dungeonVisit(run.kind, run.map) and mappedDungeons[run.map] then
+        completeObjective(encounterID)
+        return
+    end
     if run.kind == "raid" then
         raidCompletion = {key = run.key, expires = GetTime() + 10,
             participants = S.GroupRoster(true), stamp = S.Now()}
@@ -550,6 +646,37 @@ S.On("TIME_PLAYED_MSG", function(seconds)
     stats.played = seconds
 end)
 
+local function recoverDungeonClears()
+    if stats.dungeonRecovery then return end
+    local history = {}
+    local backup = type(SocialCreditBackup) == "table" and SocialCreditBackup.version == 1
+        and type(SocialCreditBackup.stats) == "table" and SocialCreditBackup.stats[S.me.key] or nil
+    for _, source in ipairs({stats, backup}) do
+        for identity in pairs(source.gearRolls and source.gearRolls.seen or {}) do
+            local encounter, start = tostring(identity):match("^(%d+)~%d+~([%d.]+)~")
+            encounter, start = tonumber(encounter), tonumber(start)
+            if start and dungeonObjectives[encounter] then
+                history[encounter] = history[encounter] or {}
+                table.insert(history[encounter], start)
+            end
+        end
+    end
+    local total, brackets = 0, {}
+    for encounter, starts in pairs(history) do
+        table.sort(starts)
+        local last, size = nil, dungeonSize(encounter)
+        for _, start in ipairs(starts) do
+            -- The loot clock is in milliseconds. Several item rolls can come from one kill.
+            if not last or start - last > 90000 then
+                total, brackets[size], last = total + 1, (brackets[size] or 0) + 1, start
+            end
+        end
+    end
+    if total > 0 then stats.dungeons = math.max(stats.dungeons or 0, total) end
+    for size, count in pairs(brackets) do stats.runs[size] = math.max(stats.runs[size] or 0, count) end
+    stats.dungeonRecovery = true
+end
+
 S.OnLevel60(function()
     stats = S.db.stats[S.me.key] or {rates = {}}
     S.db.stats[S.me.key] = stats
@@ -563,6 +690,7 @@ S.OnLevel60(function()
     stats.raidRuns, stats.completedLocks = stats.raidRuns or {}, stats.completedLocks or {}
     stats.explicitWords = stats.explicitWords or 0
     stats.gearRolls = stats.gearRolls or {sum = 0, count = 0, seen = {}}
+    recoverDungeonClears()
     refreshInstance(12)
     C_Timer.After(2, function()
         queueGear()

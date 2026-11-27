@@ -55,9 +55,10 @@ local function aggregate(subject)
     local current, clears = {}, {}
     for _, report in ipairs(reports) do
         local row = report.row
-        local key = row.map .. ":" .. row.size .. ":" .. (row.size == 5 and "dungeon" or row.token)
+        local dungeon = S.DungeonClearKey(row.token, row.size, row.stamp)
+        local key = row.map .. ":" .. row.size .. ":" .. (dungeon or row.token)
         local clear = current[key]
-        if not clear or (row.size == 5 and (row.stamp - clear.stamp > 60
+        if not clear or (dungeon and (row.stamp - clear.stamp > 60
             or clear.witnesses[report.witness])) then
             clear = {stamp = row.stamp, best = report, witnesses = {}}
             current[key], clears[#clears + 1] = clear, clear
@@ -112,9 +113,8 @@ function S.ImportBuildClear(subject, witness, payload)
     if #map > 24 or not map:match("^%d+:%d+$") or not sizes[size]
         or not stamp or stamp % 1 ~= 0 or stamp < 1 or stamp > S.Now() + 60
         or not revision or revision % 1 ~= 0 or revision < 1 or revision > 1000000 then return end
-    if size == 5 then
-        if token ~= tostring(stamp) then return end
-    elseif #token > 32 or not token:match("^%d+:%d+$") then return end
+    if #token > 32 or (not S.DungeonClearKey(token, size, stamp)
+        and (size == 5 or not token:match("^%d+:%d+$"))) then return end
     local cohorts = {}
     for i = 7, #fields, 7 do
         local build = fields[i]

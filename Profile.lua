@@ -114,7 +114,7 @@ local function statsText(subject)
     local roleLabel = role == "T" and "Tank" or role == "N" and "Non-tank" or "Role unknown"
     local heading = tree and ((name or ("Tree " .. tree)) .. " · " .. roleLabel
         .. (lastSeen and " (last seen)" or "")) or "Active talent tree unknown"
-    local captions = {[5] = "5-player dungeon", [10] = "10-player raid",
+    local captions = {[5] = "5-player dungeon", [10] = "10-player instance",
         [20] = "20-player raid", [40] = "40-player raid"}
     for _, size in ipairs({5, 10, 20, 40}) do
         local bracket = build and build[size]

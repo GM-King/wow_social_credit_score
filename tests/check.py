@@ -1856,3 +1856,93 @@ assert(S.openSubject == "test-subject")
 """)
 print("PASS: channel-free sync, private self profile, and five-member guild rankings")
 
+dungeons = Client("Dungeon Tester", saved="""
+SocialCreditDB = {version=1, stats={["dungeon-tester"]={level60Since=1, gearRolls={seen={
+    ["478~10~1000.000000~item"] = true,
+    ["478~11~1013.000000~item"] = "choice",
+    ["484~12~2000.000000~item"] = true,
+    ["483~13~3000.000000~item"] = true,
+}}}}}
+SocialCreditBackup = {version=1, stats={["dungeon-tester"]={level60Since=1, gearRolls={seen={
+    ["478~11~1013.000000~item"] = true,
+    ["3334~20~1000.000000~item"] = true,
+}}}}}
+""")
+dungeons.lua.execute("""
+local S = state
+local stats = S.db.stats[S.me.key]
+assert(stats.dungeons == 3 and stats.runs[5] == 3)
+S.me = nil
+emit("PLAYER_LOGIN")
+assert(S.db.stats[S.me.key].dungeons == 3)
+stats = S.db.stats[S.me.key]
+local map, kind, lootTime = 1, "none", 10000
+function GetInstanceInfo()
+    return "Test", kind, 1, "Normal", map == 229 and 10 or 5, 0, false, map, 5
+end
+function IsInInstance() return kind ~= "none" end
+C_LootHistory.GetLootHistoryTime = function() return lootTime end
+local function visit(nextMap, nextKind)
+    map, kind = 1, "none"
+    emit("PLAYER_ENTERING_WORLD")
+    map, kind = nextMap, nextKind or "party"
+    lootTime = lootTime + 20000
+    emit("PLAYER_ENTERING_WORLD")
+end
+visit(329)
+emit("ENCOUNTER_END", 483, "Optional boss", 1, 5, 1)
+emit("ENCOUNTER_END", 478, "Balnazzar", 1, 5, 0)
+assert(stats.dungeons == 3)
+emit("BOSS_KILL", 478)
+local live = stats.run
+emit("ENCOUNTER_END", 478, "Balnazzar", 1, 5, 1)
+emit("LFG_COMPLETION_REWARD")
+emit("BOSS_KILL", 484)
+assert(stats.dungeons == 5 and stats.runs[5] == 5)
+assert(live.groupClear.token:match("^d478:") and stats.run.groupClear.token:match("^d484:"))
+assert(live.ownerBuildRates == nil and stats.run ~= live)
+emit("PLAYER_ENTERING_WORLD")
+emit("BOSS_KILL", 484)
+assert(stats.dungeons == 5)
+visit(329)
+lootRows[1] = {startTime=lootTime - 1, itemHyperlink="item:17", rollInfos={}}
+C_LootHistory.GetSortedInfoForDrop = function(_, key) return lootRows[key] end
+emit("LOOT_HISTORY_UPDATE_DROP", 484, 1)
+assert(stats.dungeons == 5)
+lootTime = lootTime + 10
+lootRows[1].startTime = lootTime
+emit("LOOT_HISTORY_UPDATE_DROP", 484, 1)
+assert(stats.dungeons == 6)
+emit("BOSS_KILL", 478)
+assert(stats.dungeons == 7)
+SlashCmdList.SOCIALCREDITSYSTEM("self")
+assert(SocialCreditSystemProfile.stats[1].text == "Dungeons completed  7")
+local activities = {
+    {129, 437}, {70, 554}, {209, 600}, {349, 429}, {2994, 3409},
+    {109, 493}, {230, 245}, {2974, 3334}, {229, 275}, {229, 280},
+    {289, 463}, {329, 478}, {329, 484}, {429, 346}, {429, 349}, {429, 368}, {3001, 3502},
+}
+for index, activity in ipairs(activities) do
+    visit(activity[1], activity[2] == 280 and "raid" or "party")
+    emit("ENCOUNTER_END", activity[2], "", 1, 5, 1)
+    emit("LFG_COMPLETION_REWARD")
+    emit("BOSS_KILL", activity[2])
+    assert(stats.dungeons == 7 + index, activity[2])
+end
+assert(stats.runs[5] == 23 and stats.runs[10] == 1)
+visit(2974)
+emit("LFG_COMPLETION_REWARD")
+tick(clock + 2.1)
+assert(stats.dungeons == 25)
+emit("BOSS_KILL", 3334)
+assert(stats.dungeons == 25)
+local key = "test-subject"
+local now = GetServerTime()
+for _, id in ipairs({478, 484}) do
+    local message = ("329:1~d%d:%d~5~%d~1~0~0~0~0~0~0"):format(id, now, now)
+    assert(S.ImportGroupClear(key, S.me.key, message))
+end
+assert(S.ProfileStats(key).dungeons == 2)
+""")
+print("PASS: all 17 Master Spelunker objectives, split-wing clears, loot fallback, recovery and sync")
+

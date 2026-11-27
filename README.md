@@ -1,6 +1,6 @@
 # Social Credit System
 
-[Download 2.11.0](https://gm-king.github.io/wow_social_credit_score/downloads/SocialCreditSystem-2.11.0.zip) · [Installation and player guide](https://gm-king.github.io/wow_social_credit_score/)
+[Download 2.11.1](https://gm-king.github.io/wow_social_credit_score/downloads/SocialCreditSystem-2.11.1.zip) · [Installation and player guide](https://gm-king.github.io/wow_social_credit_score/)
 
 Characters at any level can view and review known same-faction profiles. A character's 0-1000 Social Credit Score unlocks at level 60 after reviews from five distinct authors. Reviews received while leveling count automatically. Use the close button or Escape to close the profile in combat.
 
@@ -25,6 +25,8 @@ In version 2.8, the original author can choose **Delete review** from the review
 Use `/scs self` to view your personal stats. At level 60, it also shows your current dungeon or raid. Rates appear after Blizzard's damage meter makes a fight readable. Hover over an instance bracket to see duration-weighted lifetime DPS and HPS and their sample counts. Completed and unfinished runs contribute to lifetime averages for you and identifiable same-faction level-60 groupmates, including players without SCS. Duplicate witness reports of a fight count once. Verified clears count toward the combat score, which requires three qualifying clears in a bracket.
 
 Open **Guilds** from the minimap menu to see known same-faction guilds on your server ranked by average member SCS. A guild appears once your client knows the scores of five distinct members. Membership and scores reflect the profiles your addon has observed.
+
+At level 60, SCS credits the final objective for each dungeon wing, including manually formed groups. Balnazzar and Baron Rivendare each count as one Stratholme clear, even in the same visit. On first login after updating to 2.11.1, SCS can recover missed lifetime clears from saved final-boss loot rolls.
 
 Reviews sync by addon whisper between reachable players running SCS. Peers discover one another through guild, party, and raid messages or direct profile lookups. The shown count covers verified reviews on this client. The addon shares the owner's gameplay snapshot and instance fight reports on request. Dungeon and battleground counts cover observed completions. Your normal `/played` command refreshes the value if you want a newer snapshot.
 

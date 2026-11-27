@@ -82,13 +82,20 @@ local function store(subject, witness, id, row)
     return true
 end
 
-function S.SaveGroupClear(run, participants, stamp)
-    local size = run.capacity
+function S.SaveGroupClear(run, participants, stamp, objective, size)
+    size = size or run.capacity
     local _, map, difficulty = run.key:match("^(%a+):(%d+):(%d+)$")
-    if not map or not brackets[size] or (run.kind == "party") ~= (size == 5) then return end
+    if not map or not brackets[size] or (not objective and (run.kind == "party") ~= (size == 5)) then return end
     run.groupClear = {participants = participants, stamp = stamp, size = size, map = map .. ":" .. difficulty,
-        token = run.lock or tostring(stamp)}
+        token = objective and ("d%d:%d"):format(objective, stamp) or run.lock or tostring(stamp)}
     for _, subject in pairs(participants) do S.UpdateGroupClear(run, subject) end
+end
+
+function S.DungeonClearKey(token, size, stamp)
+    local objective, time = token:match("^d([1-9]%d*):(%d+)$")
+    if objective and time == tostring(stamp) and #objective <= 6
+        and (size == 5 or size == 10) then return "d" .. objective end
+    if size == 5 and token == tostring(stamp) then return "dungeon" end
 end
 
 function S.UpdateGroupClear(run, subject)
@@ -130,10 +137,11 @@ local function aggregate(subject, owner)
     local latest, clears = {}, {}
     for _, item in ipairs(rows) do
         local row = item.row
-        local key = row.map .. ":" .. row.size .. ":" .. (row.size == 5 and "dungeon" or row.token)
+        local dungeon = S.DungeonClearKey(row.token, row.size, row.stamp)
+        local key = row.map .. ":" .. row.size .. ":" .. (dungeon or row.token)
         local clear = latest[key]
-        if not clear or (row.size == 5 and row.stamp - clear.stamp > 60) then
-            clear = {size = row.size, stamp = row.stamp, best = {}}
+        if not clear or (dungeon and row.stamp - clear.stamp > 60) then
+            clear = {size = row.size, stamp = row.stamp, best = {}, dungeon = dungeon}
             clears[#clears + 1], latest[key] = clear, clear
         end
         for _, offset in ipairs({1, 4}) do
@@ -149,6 +157,7 @@ local function aggregate(subject, owner)
     for _, clear in ipairs(clears) do
         local size = clear.size
         stats.groupRuns[size] = (stats.groupRuns[size] or 0) + 1
+        if clear.dungeon then stats.dungeons = (stats.dungeons or 0) + 1 end
         stats.runs[size] = (stats.runs[size] or 0) + 1
         local row = stats.rates[size] or blank()
         for _, offset in ipairs({1, 4}) do
@@ -157,7 +166,6 @@ local function aggregate(subject, owner)
         end
         stats.rates[size] = row
     end
-    if stats.groupRuns[5] then stats.dungeons = (stats.dungeons or 0) + stats.groupRuns[5] end
     return stats
 end
 
@@ -301,9 +309,8 @@ function S.ImportGroupClear(subject, witness, payload)
     if not map:match("^%d+:%d+$") or #map > 24 or not brackets[size]
         or not stamp or stamp % 1 ~= 0 or stamp < 1 or stamp > S.Now() + 60
         or not revision or revision % 1 ~= 0 or revision < 1 or revision > 1000000 then return end
-    if size == 5 then
-        if token ~= tostring(stamp) then return end
-    elseif #token > 32 or not token:match("^%d+:%d+$") then return end
+    if #token > 32 or (not S.DungeonClearKey(token, size, stamp)
+        and (size == 5 or not token:match("^%d+:%d+$"))) then return end
     local row = {map = map, token = token, size = size, stamp = stamp, revision = revision, rates = {}}
     for i = 1, 6 do
         local n = tonumber(f[i + 5])
